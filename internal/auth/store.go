@@ -1,154 +1,128 @@
 package auth
 
 import (
-	"encoding/json"
-	"os"
-	"sync"
+	"database/sql"
 	"time"
 
 	"dbmanager/internal/config"
 	"dbmanager/internal/model"
+	"dbmanager/internal/store"
 
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
 
-// UserStore 用户存储（基于 JSON 文件）
-type UserStore struct {
-	mu    sync.RWMutex
-	users []model.User
-}
+type UserStore struct{}
 
-var (
-	storeOnce sync.Once
-	store     *UserStore
-)
+var storeInst *UserStore
 
-// GetStore 获取用户存储单例
 func GetStore() *UserStore {
-	storeOnce.Do(func() {
-		store = &UserStore{}
-		store.load()
-		store.ensureAdmin()
-	})
-	return store
-}
-
-// load 从文件加载用户
-func (s *UserStore) load() {
-	cfg := config.GetConfig()
-	data, err := os.ReadFile(cfg.UsersFile)
-	if err != nil {
-		return
+	if storeInst == nil {
+		storeInst = &UserStore{}
+		storeInst.ensureAdmin()
 	}
-	_ = json.Unmarshal(data, &s.users)
+	return storeInst
 }
 
-// save 保存用户到文件
-func (s *UserStore) save() error {
-	cfg := config.GetConfig()
-	_ = os.MkdirAll(cfg.DataDir, 0755)
-	data, err := json.MarshalIndent(s.users, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(cfg.UsersFile, data, 0644)
+func (s *UserStore) db() *sql.DB {
+	return store.Get().DB()
 }
 
-// ensureAdmin 确保管理员用户存在
 func (s *UserStore) ensureAdmin() {
 	cfg := config.GetConfig()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	for _, u := range s.users {
-		if u.Role == model.RoleAdmin {
-			// 管理员已存在，检查是否需要更新密码
-			if cfg.Admin.Username != "" && u.Username != cfg.Admin.Username {
-				continue
-			}
-			return
-		}
+	var count int
+	_ = s.db().QueryRow("SELECT COUNT(*) FROM users WHERE role = 'admin'").Scan(&count)
+	if count > 0 {
+		return
 	}
 
 	hash, _ := bcrypt.GenerateFromPassword([]byte(cfg.Admin.Password), bcrypt.DefaultCost)
-	admin := model.User{
-		ID:           uuid.New().String(),
-		Username:     cfg.Admin.Username,
-		PasswordHash: string(hash),
-		Role:         model.RoleAdmin,
-		Status:       model.StatusActive,
-		CreatedAt:    time.Now(),
-	}
-	s.users = append(s.users, admin)
-	_ = s.save()
+	_, _ = s.db().Exec(
+		`INSERT INTO users (id, username, password_hash, role, status, created_at)
+		 VALUES (?, ?, ?, 'admin', 'active', ?)`,
+		uuid.New().String(), cfg.Admin.Username, string(hash), time.Now(),
+	)
 }
 
-// GetByUsername 根据用户名查找用户
+func (s *UserStore) scanUser(row *sql.Row) *model.User {
+	u := &model.User{}
+	var lastLogin sql.NullTime
+	err := row.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.Status, &u.CreatedAt, &lastLogin)
+	if err != nil {
+		return nil
+	}
+	if lastLogin.Valid {
+		t := lastLogin.Time
+		u.LastLoginAt = &t
+	}
+	return u
+}
+
+func (s *UserStore) scanUsers(rows *sql.Rows) []model.User {
+	var users []model.User
+	for rows.Next() {
+		u := model.User{}
+		var lastLogin sql.NullTime
+		if err := rows.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.Status, &u.CreatedAt, &lastLogin); err != nil {
+			continue
+		}
+		if lastLogin.Valid {
+			t := lastLogin.Time
+			u.LastLoginAt = &t
+		}
+		users = append(users, u)
+	}
+	if users == nil {
+		users = []model.User{}
+	}
+	return users
+}
+
+const userCols = "id, username, password_hash, role, status, created_at, last_login_at"
+
 func (s *UserStore) GetByUsername(username string) *model.User {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for i := range s.users {
-		if s.users[i].Username == username {
-			u := s.users[i]
-			return &u
-		}
-	}
-	return nil
+	row := s.db().QueryRow("SELECT "+userCols+" FROM users WHERE username = ?", username)
+	return s.scanUser(row)
 }
 
-// GetByID 根据ID查找用户
 func (s *UserStore) GetByID(id string) *model.User {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for i := range s.users {
-		if s.users[i].ID == id {
-			u := s.users[i]
-			return &u
-		}
-	}
-	return nil
+	row := s.db().QueryRow("SELECT "+userCols+" FROM users WHERE id = ?", id)
+	return s.scanUser(row)
 }
 
-// All 获取所有用户
 func (s *UserStore) All() []model.User {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	result := make([]model.User, len(s.users))
-	copy(result, s.users)
-	return result
+	rows, err := s.db().Query("SELECT " + userCols + " FROM users ORDER BY created_at")
+	if err != nil {
+		return []model.User{}
+	}
+	defer rows.Close()
+	return s.scanUsers(rows)
 }
 
-// Create 创建用户
 func (s *UserStore) Create(u model.User) error {
-	s.mu.Lock()
-	s.users = append(s.users, u)
-	s.mu.Unlock()
-	return s.save()
+	_, err := s.db().Exec(
+		`INSERT INTO users (id, username, password_hash, role, status, created_at, last_login_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		u.ID, u.Username, u.PasswordHash, u.Role, u.Status, u.CreatedAt, u.LastLoginAt,
+	)
+	return err
 }
 
-// Update 更新用户
 func (s *UserStore) Update(id string, fn func(*model.User)) error {
-	s.mu.Lock()
-	for i := range s.users {
-		if s.users[i].ID == id {
-			fn(&s.users[i])
-			break
-		}
+	user := s.GetByID(id)
+	if user == nil {
+		return nil
 	}
-	s.mu.Unlock()
-	return s.save()
+	fn(user)
+	_, err := s.db().Exec(
+		`UPDATE users SET username=?, password_hash=?, role=?, status=?, last_login_at=?
+		 WHERE id=?`,
+		user.Username, user.PasswordHash, user.Role, user.Status, user.LastLoginAt, id,
+	)
+	return err
 }
 
-// Delete 删除用户
 func (s *UserStore) Delete(id string) error {
-	s.mu.Lock()
-	for i, u := range s.users {
-		if u.ID == id {
-			s.users = append(s.users[:i], s.users[i+1:]...)
-			break
-		}
-	}
-	s.mu.Unlock()
-	return s.save()
+	_, err := s.db().Exec("DELETE FROM users WHERE id = ?", id)
+	return err
 }

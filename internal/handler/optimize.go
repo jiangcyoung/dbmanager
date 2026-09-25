@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"dbmanager/internal/db"
@@ -47,33 +46,18 @@ func RedisListKeys(w http.ResponseWriter, r *http.Request) {
 		Error(w, 500, "获取 key 失败: "+err.Error())
 		return
 	}
-	// 限制返回数量
 	maxKeys := 500
 	if len(keys) > maxKeys {
 		keys = keys[:maxKeys]
 	}
-	var result []interface{}
-	for _, key := range keys {
-		detail, err := rd.GetKeyDetail(key)
-		if err != nil {
-			continue
-		}
-		ttl := detail["ttl"].(int64)
-		ttlStr := "永久"
-		if ttl > 0 {
-			ttlStr = fmt.Sprintf("%ds", ttl)
-		} else if ttl == -2 {
-			ttlStr = "已过期"
-		}
-		result = append(result, map[string]interface{}{
-			"key":  key,
-			"type": detail["type"],
-			"ttl":  ttlStr,
-		})
+	details, err := rd.GetKeysDetail(keys)
+	if err != nil {
+		Error(w, 500, "获取 key 详情失败: "+err.Error())
+		return
 	}
-	auditOpt(r, "redis_list_keys", "redis", fmt.Sprintf("pattern=%s, count=%d", pattern, len(result)))
+	auditOpt(r, "redis_list_keys", "redis", fmt.Sprintf("pattern=%s, count=%d", pattern, len(details)))
 	Success(w, map[string]interface{}{
-		"keys":  result,
+		"keys":  details,
 		"total": len(keys),
 	})
 }
@@ -888,15 +872,3 @@ func SQLiteVersion(w http.ResponseWriter, r *http.Request) {
 	Success(w, result)
 }
 
-// 辅助：从 query 取 int
-func queryInt(r *http.Request, key string, def int) int {
-	v := r.URL.Query().Get(key)
-	if v == "" {
-		return def
-	}
-	n, err := strconv.Atoi(v)
-	if err != nil {
-		return def
-	}
-	return n
-}

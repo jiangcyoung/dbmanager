@@ -1,40 +1,57 @@
 package audit
 
 import (
-	"encoding/json"
-	"os"
+	"database/sql"
 	"sync"
 	"time"
 
-	"dbmanager/internal/config"
 	"dbmanager/internal/model"
+	"dbmanager/internal/store"
 
 	"github.com/google/uuid"
 )
 
-// Logger 审计日志记录器（基于 JSON Lines 文件）
+const (
+	maxBufferSize = 100
+	flushInterval = 5 * time.Second
+)
+
 type Logger struct {
-	mu sync.Mutex
+	mu     sync.Mutex
+	buffer []model.AuditLog
+	done   chan struct{}
 }
 
 var (
 	loggerOnce sync.Once
-	logger     *Logger
+	loggerInst *Logger
 )
 
-// GetLogger 获取日志记录器单例
 func GetLogger() *Logger {
 	loggerOnce.Do(func() {
-		logger = &Logger{}
+		loggerInst = &Logger{
+			done: make(chan struct{}),
+		}
+		go loggerInst.flushLoop()
 	})
-	return logger
+	return loggerInst
 }
 
-// Record 记录一条审计日志
-func (l *Logger) Record(username, role, action, resource, detail, ip, userAgent string) {
-	cfg := config.GetConfig()
-	_ = os.MkdirAll(cfg.DataDir, 0755)
+func (l *Logger) flushLoop() {
+	ticker := time.NewTicker(flushInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			l.flush()
+		case <-l.done:
+			l.flush()
+			return
+		}
+	}
+}
 
+func (l *Logger) Record(username, role, action, resource, detail, ip, userAgent string) {
 	entry := model.AuditLog{
 		ID:        uuid.New().String(),
 		Time:      time.Now(),
@@ -47,97 +64,93 @@ func (l *Logger) Record(username, role, action, resource, detail, ip, userAgent 
 		UserAgent: userAgent,
 	}
 
-	data, err := json.Marshal(entry)
-	if err != nil {
-		return
-	}
-
 	l.mu.Lock()
-	defer l.mu.Unlock()
+	l.buffer = append(l.buffer, entry)
+	shouldFlush := len(l.buffer) >= maxBufferSize
+	l.mu.Unlock()
 
-	f, err := os.OpenFile(cfg.AuditLogFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return
+	if shouldFlush {
+		l.flush()
 	}
-	defer f.Close()
-	_, _ = f.Write(append(data, '\n'))
 }
 
-// Query 查询审计日志（支持用户名、动作关键字筛选，返回最近 limit 条）
-func (l *Logger) Query(username, action string, limit int) ([]model.AuditLog, error) {
-	cfg := config.GetConfig()
-	data, err := os.ReadFile(cfg.AuditLogFile)
+func (l *Logger) flush() {
+	l.mu.Lock()
+	if len(l.buffer) == 0 {
+		l.mu.Unlock()
+		return
+	}
+	entries := l.buffer
+	l.buffer = nil
+	l.mu.Unlock()
+
+	db := store.Get().DB()
+	tx, err := db.Begin()
 	if err != nil {
-		if os.IsNotExist(err) {
-			return []model.AuditLog{}, nil
+		return
+	}
+	stmt, err := tx.Prepare(
+		`INSERT INTO audit_logs (id, time, username, role, action, resource, detail, ip, user_agent)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		tx.Rollback()
+		return
+	}
+	defer stmt.Close()
+
+	for _, e := range entries {
+		if _, err := stmt.Exec(e.ID, e.Time, e.Username, e.Role, e.Action, e.Resource, e.Detail, e.IP, e.UserAgent); err != nil {
+			tx.Rollback()
+			return
 		}
-		return nil, err
+	}
+	tx.Commit()
+}
+
+func (l *Logger) Flush() {
+	l.flush()
+}
+
+func (l *Logger) Query(username, action string, limit int) ([]model.AuditLog, error) {
+	l.flush()
+
+	db := store.Get().DB()
+	var rows *sql.Rows
+	var err error
+
+	query := "SELECT id, time, username, role, action, resource, detail, ip, user_agent FROM audit_logs WHERE 1=1"
+	var args []interface{}
+
+	if username != "" {
+		query += " AND username = ?"
+		args = append(args, username)
+	}
+	if action != "" {
+		query += " AND action LIKE ?"
+		args = append(args, "%"+action+"%")
+	}
+	query += " ORDER BY time DESC"
+	if limit > 0 {
+		query += " LIMIT ?"
+		args = append(args, limit)
 	}
 
+	rows, err = db.Query(query, args...)
+	if err != nil {
+		return []model.AuditLog{}, nil
+	}
+	defer rows.Close()
+
 	var logs []model.AuditLog
-	lines := splitLines(data)
-	// 从后往前解析
-	for i := len(lines) - 1; i >= 0; i-- {
-		line := lines[i]
-		if len(line) == 0 {
-			continue
-		}
+	for rows.Next() {
 		var entry model.AuditLog
-		if err := json.Unmarshal(line, &entry); err != nil {
-			continue
-		}
-		if username != "" && entry.Username != username {
-			continue
-		}
-		if action != "" && !containsFold(entry.Action, action) {
+		if err := rows.Scan(&entry.ID, &entry.Time, &entry.Username, &entry.Role, &entry.Action, &entry.Resource, &entry.Detail, &entry.IP, &entry.UserAgent); err != nil {
 			continue
 		}
 		logs = append(logs, entry)
-		if limit > 0 && len(logs) >= limit {
-			break
-		}
 	}
 	if logs == nil {
 		logs = []model.AuditLog{}
 	}
 	return logs, nil
-}
-
-func splitLines(data []byte) [][]byte {
-	var lines [][]byte
-	start := 0
-	for i, b := range data {
-		if b == '\n' {
-			lines = append(lines, data[start:i])
-			start = i + 1
-		}
-	}
-	if start < len(data) {
-		lines = append(lines, data[start:])
-	}
-	return lines
-}
-
-func containsFold(s, sub string) bool {
-	if len(sub) == 0 {
-		return true
-	}
-	ls := toLower(s)
-	lsub := toLower(sub)
-	for i := 0; i+len(lsub) <= len(ls); i++ {
-		if ls[i:i+len(lsub)] == lsub {
-			return true
-		}
-	}
-	return false
-}
-
-func toLower(s string) string {
-	b := []byte(s)
-	for i, c := range b {
-		if c >= 'A' && c <= 'Z' {
-			b[i] = c + 32
-		}
-	}
-	return string(b)
 }

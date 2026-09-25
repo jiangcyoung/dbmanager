@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
+	"time"
 
 	"dbmanager/internal/audit"
 	"dbmanager/internal/auth"
@@ -12,38 +16,44 @@ import (
 	"dbmanager/internal/db"
 	"dbmanager/internal/handler"
 	"dbmanager/internal/middleware"
+	"dbmanager/internal/store"
 )
 
 func main() {
 	cfg := config.GetConfig()
 
-	// 初始化用户存储（确保管理员存在）
+	if _, err := store.Init(cfg.DataDir); err != nil {
+		log.Fatalf("初始化存储失败: %v", err)
+	}
+
 	auth.GetStore()
-	// 初始化审计日志
 	audit.GetLogger()
 
-	// 从环境变量获取端口
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = cfg.Port
 	}
 
-	// 静态文件服务
+	mux := http.NewServeMux()
+
 	fs := http.FileServer(http.Dir("./web"))
-	http.Handle("/", fs)
+	mux.Handle("/", fs)
 
-	// ========== 公开路由（无需登录） ==========
-	http.HandleFunc("/api/auth/login", handler.Login)
-	http.HandleFunc("/api/auth/register", handler.Register)
+	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"ok"}`))
+	})
 
-	// ========== 需登录路由 ==========
+	mux.HandleFunc("/api/auth/login", handler.Login)
+	mux.HandleFunc("/api/auth/register", handler.Register)
+
 	authWrap := middleware.AuthMiddleware
 
-	http.HandleFunc("/api/auth/logout", authWrap(handler.Logout))
-	http.HandleFunc("/api/auth/me", authWrap(handler.Me))
+	mux.HandleFunc("/api/auth/logout", authWrap(handler.Logout))
+	mux.HandleFunc("/api/auth/me", authWrap(handler.Me))
 
-	// 连接管理
-	http.HandleFunc("/api/connections", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/connections", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			authWrap(handler.GetConnections)(w, r)
@@ -54,7 +64,7 @@ func main() {
 		}
 	})
 
-	http.HandleFunc("/api/connections/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/connections/", func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 
 		if path == "/api/connections/test" {
@@ -122,22 +132,18 @@ func main() {
 		}
 	})
 
-	// 快捷操作
-	http.HandleFunc("/api/quick/", func(w http.ResponseWriter, r *http.Request) {
-		path := r.URL.Path
+	mux.HandleFunc("/api/quick/", func(w http.ResponseWriter, r *http.Request) {
 		h := authWrap(func(w http.ResponseWriter, r *http.Request) {
 			quickRoute(w, r)
 		})
 		h(w, r)
-		_ = path
 	})
 
-	// ========== 管理员路由 ==========
 	adminWrap := func(h http.HandlerFunc) http.HandlerFunc {
 		return authWrap(middleware.AdminMiddleware(h))
 	}
 
-	http.HandleFunc("/api/admin/users", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/admin/users", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			adminWrap(handler.ListUsers)(w, r)
@@ -148,7 +154,7 @@ func main() {
 		}
 	})
 
-	http.HandleFunc("/api/admin/users/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/admin/users/", func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 		switch {
 		case strings.HasSuffix(path, "/approve") && r.Method == http.MethodPut:
@@ -164,7 +170,7 @@ func main() {
 		}
 	})
 
-	http.HandleFunc("/api/admin/audit-logs", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/admin/audit-logs", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			adminWrap(handler.AuditLogs)(w, r)
 			return
@@ -172,7 +178,7 @@ func main() {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	})
 
-	http.HandleFunc("/api/admin/online-users", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/admin/online-users", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			adminWrap(handler.OnlineUsers)(w, r)
 			return
@@ -180,7 +186,7 @@ func main() {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	})
 
-	http.HandleFunc("/api/admin/config", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/admin/config", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			adminWrap(handler.SystemConfig)(w, r)
 			return
@@ -188,25 +194,101 @@ func main() {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	})
 
-	// CORS中间件
-	h := corsMiddleware(http.DefaultServeMux)
+	var h http.Handler = mux
+	h = requestLogging(h)
+	h = corsMiddleware(h)
 
-	log.Printf("服务器启动，监听端口 %s", port)
-	log.Printf("Web UI: http://localhost:%s", port)
-	log.Printf("默认管理员账号: %s / %s", cfg.Admin.Username, cfg.Admin.Password)
-	if err := http.ListenAndServe(":"+port, h); err != nil {
-		log.Fatalf("服务器启动失败: %v", err)
+	srv := &http.Server{
+		Addr:         ":" + port,
+		Handler:      h,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 60 * time.Second,
+		IdleTimeout:  120 * time.Second,
 	}
 
-	// 关闭所有数据库连接
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	go func() {
+		log.Printf("服务器启动，监听端口 %s", port)
+		log.Printf("Web UI: http://localhost:%s", port)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("服务器启动失败: %v", err)
+		}
+	}()
+
+	<-ctx.Done()
+	log.Println("正在关闭服务器...")
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("服务器关闭异常: %v", err)
+	}
+
+	audit.GetLogger().Flush()
 	db.GetManager().CloseAll()
+	store.Get().Close()
+	log.Println("服务器已关闭")
 }
 
-// quickRoute 快捷操作路由分发
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusWriter) WriteHeader(code int) {
+	w.status = code
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func requestLogging(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(sw, r)
+		log.Printf("%s %s %d %s", r.Method, r.URL.Path, sw.status, time.Since(start))
+	})
+}
+
+func corsMiddleware(next http.Handler) http.Handler {
+	allowedOrigins := os.Getenv("ALLOWED_ORIGINS")
+	var originSet map[string]bool
+	if allowedOrigins != "" {
+		originSet = make(map[string]bool)
+		for _, o := range strings.Split(allowedOrigins, ",") {
+			o = strings.TrimSpace(o)
+			if o != "" {
+				originSet[o] = true
+			}
+		}
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if originSet != nil {
+			if originSet[origin] {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+			}
+		} else {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+		}
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
 func quickRoute(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	switch {
-	// ========== Redis 优化操作 ==========
 	case strings.Contains(path, "/redis/keys") && r.Method == http.MethodGet:
 		handler.RedisListKeys(w, r)
 	case strings.Contains(path, "/redis/key") && r.Method == http.MethodGet:
@@ -232,7 +314,6 @@ func quickRoute(w http.ResponseWriter, r *http.Request) {
 	case strings.Contains(path, "/redis/flushdb") && r.Method == http.MethodPost:
 		handler.RedisFlushDB(w, r)
 
-	// ========== MongoDB 优化操作 ==========
 	case strings.Contains(path, "/mongo/aggregate") && r.Method == http.MethodPost:
 		handler.MongoAggregate(w, r)
 	case strings.Contains(path, "/mongo/count") && r.Method == http.MethodGet:
@@ -246,7 +327,6 @@ func quickRoute(w http.ResponseWriter, r *http.Request) {
 	case strings.Contains(path, "/mongo/find") && r.Method == http.MethodPost:
 		handler.MongoFindWithOptions(w, r)
 
-	// ========== PostgreSQL 优化操作 ==========
 	case strings.Contains(path, "/pg/schemas") && r.Method == http.MethodGet:
 		handler.PGListSchemas(w, r)
 	case strings.Contains(path, "/pg/schema") && r.Method == http.MethodPost:
@@ -266,7 +346,6 @@ func quickRoute(w http.ResponseWriter, r *http.Request) {
 	case strings.Contains(path, "/pg/sequences") && r.Method == http.MethodGet:
 		handler.PGSequences(w, r)
 
-	// ========== SQLite 优化操作 ==========
 	case strings.Contains(path, "/sqlite/pragmas") && r.Method == http.MethodGet:
 		handler.SQLiteGetPragmas(w, r)
 	case strings.Contains(path, "/sqlite/pragma") && r.Method == http.MethodPut:
@@ -280,7 +359,6 @@ func quickRoute(w http.ResponseWriter, r *http.Request) {
 	case strings.Contains(path, "/sqlite/version") && r.Method == http.MethodGet:
 		handler.SQLiteVersion(w, r)
 
-	// ========== 原有快捷操作 ==========
 	case strings.HasSuffix(path, "/databases") && r.Method == http.MethodGet:
 		handler.QuickListDatabases(w, r)
 	case strings.HasSuffix(path, "/database") && r.Method == http.MethodPost:
@@ -314,20 +392,4 @@ func quickRoute(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
-}
-
-// corsMiddleware CORS中间件
-func corsMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		next.ServeHTTP(w, r)
-	})
 }

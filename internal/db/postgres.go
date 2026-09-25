@@ -10,7 +10,6 @@ import (
 	_ "github.com/lib/pq"
 )
 
-// PostgresDriver PostgreSQL驱动
 type PostgresDriver struct {
 	db *sql.DB
 }
@@ -21,7 +20,6 @@ func (d *PostgresDriver) Connect(conn model.DBConnection) error {
 	for k, v := range conn.Params {
 		dsn += fmt.Sprintf(" %s=%s", k, v)
 	}
-
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
 		return err
@@ -52,40 +50,7 @@ func (d *PostgresDriver) Query(sql string, _ string) (*model.QueryResult, error)
 		return nil, err
 	}
 	defer rows.Close()
-
-	columns, err := rows.Columns()
-	if err != nil {
-		return nil, err
-	}
-
-	var result []interface{}
-	for rows.Next() {
-		values := make([]interface{}, len(columns))
-		valuePtrs := make([]interface{}, len(columns))
-		for i := range columns {
-			valuePtrs[i] = &values[i]
-		}
-		if err := rows.Scan(valuePtrs...); err != nil {
-			return nil, err
-		}
-		row := make(map[string]interface{})
-		for i, col := range columns {
-			val := values[i]
-			if b, ok := val.([]byte); ok {
-				row[col] = string(b)
-			} else {
-				row[col] = val
-			}
-		}
-		result = append(result, row)
-	}
-
-	return &model.QueryResult{
-		Success: true,
-		Columns: columns,
-		Rows:    result,
-		Count:   int64(len(result)),
-	}, nil
+	return queryRows(rows)
 }
 
 func (d *PostgresDriver) Execute(sql string, _ string) (*model.QueryResult, error) {
@@ -111,7 +76,6 @@ func (d *PostgresDriver) ListTables() ([]string, error) {
 		return nil, err
 	}
 	defer rows.Close()
-
 	var tables []string
 	for rows.Next() {
 		var table string

@@ -7,23 +7,21 @@ import (
 	"dbmanager/internal/model"
 )
 
-// DBDriver 数据库驱动接口
+const (
+	maxPoolSize     = 50
+	idleTimeout     = 30 * time.Minute
+	cleanupInterval = 5 * time.Minute
+)
+
 type DBDriver interface {
-	// Connect 建立连接
 	Connect(conn model.DBConnection) error
-	// Close 关闭连接
 	Close() error
-	// Ping 测试连接
 	Ping() (time.Duration, error)
-	// Query 执行查询
 	Query(sql string, collection string) (*model.QueryResult, error)
-	// Execute 执行写操作
 	Execute(sql string, collection string) (*model.QueryResult, error)
-	// ListTables 列出所有表/集合
 	ListTables() ([]string, error)
 }
 
-// PooledConnection 连接池中的连接
 type PooledConnection struct {
 	Conn      DBDriver
 	Config    model.DBConnection
@@ -31,10 +29,10 @@ type PooledConnection struct {
 	CreatedAt time.Time
 }
 
-// Manager 数据库连接管理器
 type Manager struct {
 	pool map[string]*PooledConnection
 	mu   sync.RWMutex
+	done chan struct{}
 }
 
 var (
@@ -42,33 +40,57 @@ var (
 	once    sync.Once
 )
 
-// GetManager 获取连接管理器单例
 func GetManager() *Manager {
 	once.Do(func() {
 		manager = &Manager{
 			pool: make(map[string]*PooledConnection),
+			done: make(chan struct{}),
 		}
+		go manager.cleanupLoop()
 	})
 	return manager
 }
 
-// GetConnection 获取或创建数据库连接
 func (m *Manager) GetConnection(conn model.DBConnection) (DBDriver, error) {
 	m.mu.RLock()
 	if pc, ok := m.pool[conn.ID]; ok {
-		// 检查连接是否还活着
 		if _, err := pc.Conn.Ping(); err == nil {
 			pc.LastUsed = time.Now()
 			m.mu.RUnlock()
 			return pc.Conn, nil
 		}
-		// 连接失效，关闭后重新创建
 		pc.Conn.Close()
 		delete(m.pool, conn.ID)
 	}
 	m.mu.RUnlock()
 
-	// 创建新连接
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if pc, ok := m.pool[conn.ID]; ok {
+		if _, err := pc.Conn.Ping(); err == nil {
+			pc.LastUsed = time.Now()
+			return pc.Conn, nil
+		}
+		pc.Conn.Close()
+		delete(m.pool, conn.ID)
+	}
+
+	if len(m.pool) >= maxPoolSize {
+		var oldestID string
+		var oldestTime time.Time
+		for id, pc := range m.pool {
+			if oldestID == "" || pc.LastUsed.Before(oldestTime) {
+				oldestID = id
+				oldestTime = pc.LastUsed
+			}
+		}
+		if oldestID != "" {
+			m.pool[oldestID].Conn.Close()
+			delete(m.pool, oldestID)
+		}
+	}
+
 	driver, err := m.createDriver(conn)
 	if err != nil {
 		return nil, err
@@ -77,19 +99,16 @@ func (m *Manager) GetConnection(conn model.DBConnection) (DBDriver, error) {
 		return nil, err
 	}
 
-	m.mu.Lock()
+	now := time.Now()
 	m.pool[conn.ID] = &PooledConnection{
 		Conn:      driver,
 		Config:    conn,
-		LastUsed:  time.Now(),
-		CreatedAt: time.Now(),
+		LastUsed:  now,
+		CreatedAt: now,
 	}
-	m.mu.Unlock()
-
 	return driver, nil
 }
 
-// TestConnection 测试连接（不放入连接池）
 func (m *Manager) TestConnection(conn model.DBConnection) *model.TestResult {
 	start := time.Now()
 	driver, err := m.createDriver(conn)
@@ -126,7 +145,6 @@ func (m *Manager) TestConnection(conn model.DBConnection) *model.TestResult {
 	}
 }
 
-// CloseConnection 关闭指定连接
 func (m *Manager) CloseConnection(id string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -154,7 +172,6 @@ func (m *Manager) Connect(conn model.DBConnection) error {
 	return err
 }
 
-// CloseAll 关闭所有连接
 func (m *Manager) CloseAll() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -162,9 +179,53 @@ func (m *Manager) CloseAll() {
 		pc.Conn.Close()
 		delete(m.pool, id)
 	}
+	select {
+	case <-m.done:
+	default:
+		close(m.done)
+	}
 }
 
-// createDriver 根据数据库类型创建驱动
+func (m *Manager) cleanupLoop() {
+	ticker := time.NewTicker(cleanupInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			m.cleanupIdle()
+		case <-m.done:
+			return
+		}
+	}
+}
+
+func (m *Manager) cleanupIdle() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := time.Now()
+	for id, pc := range m.pool {
+		if now.Sub(pc.LastUsed) > idleTimeout {
+			pc.Conn.Close()
+			delete(m.pool, id)
+		}
+	}
+	for len(m.pool) > maxPoolSize {
+		var oldestID string
+		var oldestTime time.Time
+		for id, pc := range m.pool {
+			if oldestID == "" || pc.LastUsed.Before(oldestTime) {
+				oldestID = id
+				oldestTime = pc.LastUsed
+			}
+		}
+		if oldestID == "" {
+			break
+		}
+		m.pool[oldestID].Conn.Close()
+		delete(m.pool, oldestID)
+	}
+}
+
 func (m *Manager) createDriver(conn model.DBConnection) (DBDriver, error) {
 	switch conn.Type {
 	case model.DBTypeMySQL:
@@ -182,7 +243,6 @@ func (m *Manager) createDriver(conn model.DBConnection) (DBDriver, error) {
 	}
 }
 
-// UnsupportedDBTypeError 不支持的数据库类型错误
 type UnsupportedDBTypeError struct {
 	Type string
 }

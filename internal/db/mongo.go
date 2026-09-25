@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"time"
 
 	"dbmanager/internal/model"
@@ -21,7 +22,7 @@ type MongoDriver struct {
 
 func (d *MongoDriver) Connect(conn model.DBConnection) error {
 	uri := fmt.Sprintf("mongodb://%s:%s@%s:%d/%s?authSource=admin",
-		conn.Username, conn.Password, conn.Host, conn.Port, conn.Database)
+		url.QueryEscape(conn.Username), url.QueryEscape(conn.Password), conn.Host, conn.Port, conn.Database)
 	// 如果没有用户名密码，使用简化连接
 	if conn.Username == "" {
 		uri = fmt.Sprintf("mongodb://%s:%d/%s", conn.Host, conn.Port, conn.Database)

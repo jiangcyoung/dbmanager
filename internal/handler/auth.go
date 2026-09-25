@@ -23,6 +23,7 @@ type RegisterRequest struct {
 
 // Login 登录
 func Login(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		Error(w, 400, "参数错误")
@@ -48,6 +49,7 @@ func Login(w http.ResponseWriter, r *http.Request) {
 
 // Register 注册
 func Register(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req RegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		Error(w, 400, "参数错误")

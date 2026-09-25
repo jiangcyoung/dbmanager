@@ -1,9 +1,6 @@
 {
   "port": "8080",
   "data_dir": "data",
-  "connections_file": "data/connections.json",
-  "users_file": "data/users.json",
-  "audit_log_file": "data/audit.log",
   "session_timeout_minutes": 120,
   "admin": {
     "username": "admin",

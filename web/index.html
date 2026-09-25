@@ -5,6 +5,25 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DB Manager - 数据库连接管理</title>
     <link rel="stylesheet" href="style.css">
+    <script>
+        (function() {
+            const THEME_KEY = 'dbmanager-theme';
+            const mq = window.matchMedia('(prefers-color-scheme: light)');
+            function getSystemTheme() { return mq.matches ? 'light' : 'dark'; }
+            function applyTheme(theme) {
+                const effective = (theme === 'system' || !theme) ? getSystemTheme() : theme;
+                document.documentElement.classList.remove('light', 'dark');
+                document.documentElement.classList.add(effective);
+                if (theme) localStorage.setItem(THEME_KEY, theme);
+            }
+            const saved = localStorage.getItem(THEME_KEY) || 'system';
+            applyTheme(saved);
+            window.__theme = { saved, apply: applyTheme, getSystemTheme };
+            mq.addEventListener('change', function() {
+                if ((localStorage.getItem(THEME_KEY) || 'system') === 'system') applyTheme('system');
+            });
+        })();
+    </script>
 </head>
 <body>
     <!-- 登录/注册页 -->
@@ -27,7 +46,7 @@
                 <div class="auth-hint" id="authHint"></div>
                 <button type="button" class="btn btn-primary btn-block" id="authSubmitBtn" onclick="submitAuth()">登 录</button>
             </form>
-            <div class="auth-footer">默认管理员账号：admin / admin123</div>
+            <div class="auth-footer">首次登录请使用管理员账号</div>
         </div>
     </div>
 
@@ -60,6 +79,11 @@
                 <div class="topbar-left" id="topbarTitle">数据库管理</div>
                 <div class="topbar-right">
                     <span class="online-badge" id="onlineBadge" onclick="openAdminPanel('online')">🟢 在线: <b id="onlineCount">0</b></span>
+                    <select id="themeSwitch" class="theme-switch" aria-label="主题">
+                        <option value="system">跟随系统</option>
+                        <option value="light">浅色</option>
+                        <option value="dark">深色</option>
+                    </select>
                     <span class="user-info">
                         <span class="user-role" id="userRole">admin</span>
                         <span class="user-name" id="userName">admin</span>
@@ -332,6 +356,17 @@
         </div>
     </div>
 
+    <script>
+        (function() {
+            const themeSwitch = document.getElementById('themeSwitch');
+            if (themeSwitch) {
+                themeSwitch.value = localStorage.getItem('dbmanager-theme') || 'system';
+                themeSwitch.addEventListener('change', function(e) {
+                    if (window.__theme) window.__theme.apply(e.target.value);
+                });
+            }
+        })();
+    </script>
     <script src="app.js"></script>
 </body>
 </html>

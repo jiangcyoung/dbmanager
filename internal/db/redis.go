@@ -103,23 +103,22 @@ func (d *RedisDriver) Execute(sql string, collection string) (*model.QueryResult
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	var key, value string
-	cmd := sql
-	if len(cmd) > 4 && cmd[:3] == "SET" {
-		fmt.Sscanf(cmd[4:], "%s %s", &key, &value)
+	cmd := strings.TrimSpace(sql)
+	if cmd == "" {
+		return nil, fmt.Errorf("命令不能为空")
 	}
-	if key == "" {
-		return nil, fmt.Errorf("Redis写操作格式: SET key value")
+	parts := strings.Fields(cmd)
+	args := make([]interface{}, len(parts))
+	for i, p := range parts {
+		args[i] = p
 	}
-
-	err := d.client.Set(ctx, key, value, 0).Err()
+	result, err := d.client.Do(ctx, args...).Result()
 	if err != nil {
 		return nil, err
 	}
-
 	return &model.QueryResult{
 		Success: true,
-		Message: "执行成功",
+		Message: fmt.Sprintf("%v", result),
 		Count:   1,
 	}, nil
 }
@@ -304,6 +303,39 @@ func (d *RedisDriver) FlushDB() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return d.client.FlushDB(ctx).Err()
+}
+
+// GetKeysDetail 批量获取 key 的类型和 TTL（pipeline 减少 N+1）
+func (d *RedisDriver) GetKeysDetail(keys []string) ([]map[string]interface{}, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	pipe := d.client.Pipeline()
+	typeCmds := make([]*redis.StatusCmd, len(keys))
+	ttlCmds := make([]*redis.DurationCmd, len(keys))
+	for i, key := range keys {
+		typeCmds[i] = pipe.Type(ctx, key)
+		ttlCmds[i] = pipe.TTL(ctx, key)
+	}
+	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
+		return nil, err
+	}
+	result := make([]map[string]interface{}, 0, len(keys))
+	for i, key := range keys {
+		keyType := typeCmds[i].Val()
+		ttl := ttlCmds[i].Val()
+		ttlStr := "永久"
+		if ttl > 0 {
+			ttlStr = fmt.Sprintf("%ds", int(ttl.Seconds()))
+		} else if ttl == -2 {
+			ttlStr = "已过期"
+		}
+		result = append(result, map[string]interface{}{
+			"key":  key,
+			"type": keyType,
+			"ttl":  ttlStr,
+		})
+	}
+	return result, nil
 }
 
 // GetRedisDriver 获取 Redis 驱动

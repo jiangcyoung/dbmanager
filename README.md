@@ -28,13 +28,13 @@
 - **权限控制**：所有管理接口需管理员权限，所有数据库接口需登录
 
 ### 审计与监控
-- **审计日志**：所有平台操作（登录、注册、审批、库表操作、SQL 执行、优化操作等）均记录到服务本地文件（JSON Lines 格式），含时间、用户、角色、操作类型、资源、详情、IP、User-Agent
+- **审计日志**：所有平台操作（登录、注册、审批、库表操作、SQL 执行、优化操作等）均记录到内置 SQLite 数据库，含时间、用户、角色、操作类型、资源、详情、IP、User-Agent，支持按用户/操作类型筛选
 - **在线用户统计**：实时显示当前在线用户数及列表（用户名、角色、登录时间、最后活跃、IP），自动刷新
 
 ### 系统配置
 - 统一配置文件 `config.json`，可配置：
   - 系统管理员用户名/密码
-  - 数据目录、用户文件、审计日志文件路径
+  - 数据目录（SQLite 数据库文件存放位置）
   - 会话超时时间
 
 ### 数据库专属优化
@@ -48,38 +48,172 @@
 | **MongoDB** | 聚合管道、countDocuments、distinct 去重、集合统计、数据库统计、高级查询（排序/分页/投影） |
 | **Redis** | 类型感知 Key 操作（String/Hash/List/Set/ZSet 各自增删改查）、TTL 管理、SCAN 替代 KEYS（生产安全）、服务器 INFO、DBSize、FlushDB |
 
+## 🏛️ 项目架构图
+
+```mermaid
+graph TB
+    subgraph Client["🖥️ 客户端"]
+        Browser["浏览器<br/>(Web UI: HTML/CSS/JS)"]
+    end
+
+    subgraph HTTPServer["⚙️ Go HTTP Server (cmd/server/main.go)"]
+        direction TB
+        subgraph Middleware["中间件链"]
+            direction LR
+            M1["CORS"] --> M2["请求日志"] --> M3["认证 Token"] --> M4["管理员权限"]
+        end
+        subgraph Router["路由分发"]
+            direction LR
+            R1["/api/auth"] & R2["/api/connections"] & R3["/api/quick/"] & R4["/api/admin"] & R5["/api/health"]
+        end
+    end
+
+    subgraph HandlerLayer["📡 处理器层 (handler/)"]
+        direction LR
+        H1["auth.go<br/>登录/注册/登出"]
+        H2["handler.go<br/>连接管理/查询执行"]
+        H3["quick.go<br/>库表行索引 CRUD"]
+        H4["optimize.go<br/>数据库专属优化"]
+        H5["admin.go<br/>用户/审计/配置"]
+    end
+
+    subgraph ServiceLayer["🔧 业务服务层"]
+        direction LR
+        S1["auth/<br/>用户存储 · 会话管理<br/>登录/注册/登出"]
+        S2["config/<br/>配置加载 · 连接管理"]
+        S3["audit/<br/>缓冲写入 · SQL 查询"]
+        S4["middleware/<br/>Token 校验 · 角色判断"]
+    end
+
+    subgraph StoreLayer["💾 内置存储 (store/)"]
+        direction TB
+        SQLiteDB["SQLite (WAL 模式)<br/>data/dbmanager.db"]
+        subgraph Tables["数据表"]
+            direction LR
+            T1["users<br/>用户账号"]
+            T2["connections<br/>连接配置"]
+            T3["audit_logs<br/>审计日志"]
+        end
+        SQLiteDB --- Tables
+    end
+
+    subgraph DriverLayer["🗄️ 数据库驱动层 (db/)"]
+        direction TB
+        Pool["manager.go<br/>连接池 · 双检锁 · LRU 淘汰 · 空闲清理"]
+        subgraph Drivers["DBDriver 统一接口"]
+            direction LR
+            D1["mysql.go"] & D2["postgres.go"] & D3["sqlite.go"] & D4["mongo.go"] & D5["redis.go"]
+        end
+        Scan["scan.go — 共享 SQL 行扫描 (MySQL/PG/SQLite 复用)"]
+    end
+
+    subgraph Databases["🌐 外部数据库"]
+        direction LR
+        DB1[("MySQL")] & DB2[("PostgreSQL")] & DB3[("SQLite 文件")] & DB4[("MongoDB")] & DB5[("Redis")]
+    end
+
+    Browser -->|HTTP 请求| HTTPServer
+    Middleware --> Router
+    Router --> HandlerLayer
+    H1 --> S1
+    H2 --> S2
+    H2 --> Pool
+    H3 --> Pool
+    H4 --> Pool
+    H5 --> S3
+    H1 -.->|审计| S3
+    H2 -.->|审计| S3
+    H3 -.->|审计| S3
+    H4 -.->|审计| S3
+    H5 -.->|审计| S3
+    S1 -->|用户 CRUD| StoreLayer
+    S2 -->|连接 CRUD| StoreLayer
+    S3 -->|日志写入/查询| StoreLayer
+    Pool --> Drivers
+    Drivers --> Scan
+    D1 --> DB1
+    D2 --> DB2
+    D3 --> DB3
+    D4 --> DB4
+    D5 --> DB5
+```
+
+### 请求处理流程
+
+```
+浏览器 ──HTTP──▶ CORS ──▶ 请求日志 ──▶ 路由分发 ──▶ [认证中间件] ──▶ [管理员中间件]
+                                                              │
+                                                              ▼
+                                                       Handler 处理器
+                                                     ╱      │       ╲
+                                                业务服务   连接池    审计记录
+                                               (auth/    (manager   (audit/
+                                                config/    .go)     buffer)
+                                                store/)     │         │
+                                                            │    ┌────┘
+                                                            ▼    ▼
+                                                     ┌──────────────────┐
+                                                     │  SQLite (WAL)    │
+                                                     │  dbmanager.db    │
+                                                     │  users / conns   │
+                                                     │  audit_logs      │
+                                                     └──────────────────┘
+                                                            │
+                                                            ▼
+                                                     外部数据库驱动
+                                                     MySQL PG Mongo Redis
+```
+
+### 关键设计决策
+
+| 设计点 | 方案 |
+|--------|------|
+| HTTP 框架 | Go 标准库 `net/http`，零第三方依赖 |
+| 内置存储 | SQLite (WAL 模式) 统一存储用户、连接、审计日志，`modernc.org/sqlite` 纯 Go 无 CGO |
+| 连接池 | 双检锁 + LRU 淘汰 + 空闲连接定时清理 (max=50) |
+| SQL 扫描 | `scan.go` 共享 `queryRows`，MySQL/PG/SQLite 三驱动复用 |
+| Redis 批量 | Pipeline 批量 TYPE+TTL，消除 N+1 查询 |
+| 审计日志 | 内存缓冲 (≥100条或5s) + 事务批量 INSERT + SQL 索引查询 |
+| 会话管理 | 内存 Token + 自动续期 + 超时清理 |
+| 优雅关闭 | `signal.NotifyContext` → `srv.Shutdown` → `audit.Flush` → `db.CloseAll` → `store.Close` |
+| 安全 | `MaxBytesReader` 限流 · `url.QueryEscape` 防注入 · CORS 白名单 |
+
 ## 🏗️ 项目结构
 
 ```
 dbmanager/
-├── cmd/server/main.go          # 服务主入口（HTTP 路由）
-├── config.json                 # 系统配置文件（管理员账号、数据目录等）
+├── cmd/server/main.go          # 服务主入口（HTTP 路由、优雅关闭）
+├── config.json                 # 系统配置文件（管理员账号、数据目录、端口等）
 ├── internal/
 │   ├── model/model.go          # 数据模型定义（用户、审计日志、连接等）
-│   ├── config/config.go        # 配置管理（JSON 持久化）
+│   ├── store/sqlite.go         # 内置 SQLite 存储引擎（WAL 模式，建表，统一管理）
+│   ├── config/config.go        # 配置管理 + 连接 CRUD（SQLite 持久化）
 │   ├── db/                     # 数据库驱动层
-│   │   ├── manager.go          # 连接池管理器
+│   │   ├── manager.go          # 连接池管理器（双检锁·LRU·空闲清理）
+│   │   ├── scan.go             # 共享 SQL 行扫描（MySQL/PG/SQLite 复用）
 │   │   ├── mysql.go            # MySQL 驱动
 │   │   ├── postgres.go         # PostgreSQL 驱动
-│   │   ├── sqlite.go           # SQLite 驱动
+│   │   ├── sqlite.go           # SQLite 驱动（外部 SQLite 文件连接）
 │   │   ├── mongo.go            # MongoDB 驱动（含聚合、统计等）
-│   │   └── redis.go            # Redis 驱动（含类型感知操作）
+│   │   └── redis.go            # Redis 驱动（Pipeline 批量·类型感知）
 │   ├── auth/                   # 认证与用户存储
-│   │   ├── store.go            # 用户存储（JSON 文件）
-│   │   ├── session.go          # 会话/Token 管理
+│   │   ├── store.go            # 用户存储（SQLite 后端）
+│   │   ├── session.go          # 会话/Token 管理（内存）
 │   │   └── auth.go             # 登录/注册/登出逻辑
-│   ├── audit/audit.go          # 审计日志记录与查询
+│   ├── audit/audit.go          # 审计日志（缓冲写入 + SQLite 存储）
 │   ├── middleware/middleware.go # 认证与权限中间件
 │   └── handler/
 │       ├── handler.go          # HTTP API 处理器
 │       ├── quick.go            # 快捷操作 API（库/表/行/索引）
 │       ├── auth.go             # 认证 API
-│       ├── admin.go            # 管理 API（用户/审计/在线用户）
+│       ├── admin.go            # 管理 API（用户/审计/在线用户/配置）
 │       └── optimize.go         # 数据库专属优化 API
 ├── web/                        # 前端静态资源
 │   ├── index.html
 │   ├── style.css
 │   └── app.js
+├── data/                       # 数据目录（运行时自动创建）
+│   └── dbmanager.db            # SQLite 数据库（用户/连接/审计日志）
 ├── Dockerfile                  # 多阶段构建镜像
 ├── docker-compose.yml          # Docker Compose 部署
 ├── docker-compose-full.yml     # 含测试数据库的一键部署
@@ -138,9 +272,6 @@ docker-compose -f docker-compose-full.yml up -d
 {
   "port": "8080",
   "data_dir": "data",
-  "connections_file": "data/connections.json",
-  "users_file": "data/users.json",
-  "audit_log_file": "data/audit.log",
   "session_timeout_minutes": 120,
   "admin": {
     "username": "admin",
@@ -248,7 +379,7 @@ docker-compose -f docker-compose-full.yml up -d
 ## 🛠️ 技术栈
 
 - **后端**：Go (net/http 标准库，无第三方框架依赖)
-- **驱动**：go-sql-driver/mysql、lib/pq、modernc.org/sqlite、mongo-driver、go-redis
+- **内置存储**：SQLite (WAL 模式) — `modernc.org/sqlite` 纯 Go 驱动，无 CGO 依赖
+- **外部驱动**：go-sql-driver/mysql、lib/pq、mongo-driver、go-redis
 - **前端**：原生 HTML/CSS/JavaScript
 - **部署**：Docker 多阶段构建（alpine 运行时），数据卷持久化
-- **存储**：用户/连接/审计日志均以 JSON 文件持久化到数据目录

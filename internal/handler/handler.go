@@ -25,10 +25,30 @@ func auditRecord(r *http.Request, action, resource, detail string) {
 	audit.GetLogger().Record(username, role, action, resource, detail, middleware.ClientIP(r), middleware.UserAgent(r))
 }
 
+// httpStatus 将业务 code 映射为 HTTP 状态码
+func httpStatus(code int) int {
+	switch code {
+	case 0:
+		return http.StatusOK
+	case 400:
+		return http.StatusBadRequest
+	case 401:
+		return http.StatusUnauthorized
+	case 403:
+		return http.StatusForbidden
+	case 404:
+		return http.StatusNotFound
+	case 500:
+		return http.StatusInternalServerError
+	default:
+		return http.StatusOK
+	}
+}
+
 // Response 统一响应
 func Response(w http.ResponseWriter, code int, message string, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
+	w.WriteHeader(httpStatus(code))
 	json.NewEncoder(w).Encode(model.APIResponse{
 		Code:    code,
 		Message: message,

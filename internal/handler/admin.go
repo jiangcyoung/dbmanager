@@ -8,6 +8,7 @@ import (
 
 	"dbmanager/internal/audit"
 	"dbmanager/internal/auth"
+	"dbmanager/internal/config"
 	"dbmanager/internal/middleware"
 	"dbmanager/internal/model"
 )
@@ -231,13 +232,12 @@ func SystemConfig(w http.ResponseWriter, r *http.Request) {
 	admin := middleware.UserFromContext(r.Context())
 	audit.GetLogger().Record(admin.Username, string(admin.Role), "view_config", "system",
 		"查看系统配置", middleware.ClientIP(r), middleware.UserAgent(r))
+	cfg := config.GetConfig()
 	Success(w, map[string]interface{}{
-		"port":                   "***",
-		"data_dir":               "data",
-		"connections_file":       "data/connections.json",
-		"users_file":             "data/users.json",
-		"audit_log_file":         "data/audit.log",
-		"session_timeout_minutes": 120,
-		"admin_username":         "admin",
+		"port":                    "***",
+		"data_dir":                cfg.DataDir,
+		"db_file":                 cfg.DataDir + "/dbmanager.db",
+		"session_timeout_minutes": cfg.SessionTimeoutMin,
+		"admin_username":          cfg.Admin.Username,
 	})
 }
