@@ -52,6 +52,13 @@ func main() {
 
 	mux.HandleFunc("/api/auth/logout", authWrap(handler.Logout))
 	mux.HandleFunc("/api/auth/me", authWrap(handler.Me))
+	mux.HandleFunc("/api/auth/change-password", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut {
+			authWrap(handler.ChangePassword)(w, r)
+			return
+		}
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	})
 
 	mux.HandleFunc("/api/connections", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -163,6 +170,8 @@ func main() {
 			adminWrap(handler.DisableUser)(w, r)
 		case strings.HasSuffix(path, "/role") && r.Method == http.MethodPut:
 			adminWrap(handler.ChangeUserRole)(w, r)
+		case strings.HasSuffix(path, "/reset-password") && r.Method == http.MethodPut:
+			adminWrap(handler.ResetPassword)(w, r)
 		case r.Method == http.MethodDelete:
 			adminWrap(handler.DeleteUser)(w, r)
 		default:

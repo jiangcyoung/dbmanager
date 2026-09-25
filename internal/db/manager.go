@@ -1,6 +1,7 @@
 package db
 
 import (
+	"errors"
 	"sync"
 	"time"
 
@@ -13,13 +14,16 @@ const (
 	cleanupInterval = 5 * time.Minute
 )
 
+// ErrNotConnected 连接未建立（需用户显式点击"连接"）
+var ErrNotConnected = errors.New("连接未建立，请先点击『连接』")
+
 type DBDriver interface {
 	Connect(conn model.DBConnection) error
 	Close() error
 	Ping() (time.Duration, error)
 	Query(sql string, collection string) (*model.QueryResult, error)
 	Execute(sql string, collection string) (*model.QueryResult, error)
-	ListTables() ([]string, error)
+	ListTables(dbName string) ([]string, error)
 }
 
 type PooledConnection struct {
@@ -107,6 +111,27 @@ func (m *Manager) GetConnection(conn model.DBConnection) (DBDriver, error) {
 		CreatedAt: now,
 	}
 	return driver, nil
+}
+
+// GetActiveConnection 仅返回已建立的连接，不自动建立连接
+func (m *Manager) GetActiveConnection(id string) (DBDriver, error) {
+	m.mu.RLock()
+	pc, ok := m.pool[id]
+	m.mu.RUnlock()
+	if !ok {
+		return nil, ErrNotConnected
+	}
+	if _, err := pc.Conn.Ping(); err != nil {
+		pc.Conn.Close()
+		m.mu.Lock()
+		if cur, ok := m.pool[id]; ok && cur == pc {
+			delete(m.pool, id)
+		}
+		m.mu.Unlock()
+		return nil, ErrNotConnected
+	}
+	pc.LastUsed = time.Now()
+	return pc.Conn, nil
 }
 
 func (m *Manager) TestConnection(conn model.DBConnection) *model.TestResult {

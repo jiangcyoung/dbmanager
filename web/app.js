@@ -86,6 +86,7 @@ async function submitAuth() {
 
 // 退出登录
 async function logout() {
+    closeUserMenu();
     try {
         await authFetch(`${API_BASE}/auth/logout`, { method: 'POST' });
     } catch (e) {}
@@ -102,6 +103,8 @@ function showApp(show) {
     if (show) {
         document.getElementById('userName').textContent = currentUser.username;
         document.getElementById('userRole').textContent = currentUser.role === 'admin' ? '管理员' : '用户';
+        document.getElementById('userAvatar').textContent = (currentUser.username || '?').charAt(0).toUpperCase();
+        closeUserMenu();
         document.getElementById('adminSection').style.display = currentUser.role === 'admin' ? 'block' : 'none';
         document.getElementById('onlineBadge').style.display = currentUser.role === 'admin' ? 'inline-flex' : 'none';
         loadConnections();
@@ -214,6 +217,7 @@ async function loadUsers() {
                         ${u.status === 'pending' ? `<button class="btn btn-xs btn-primary" onclick="approveUser('${u.id}')">通过</button>` : ''}
                         ${u.role === 'user' ? `<button class="btn btn-xs" onclick="changeRole('${u.id}')">设为管理员</button>` : `<button class="btn btn-xs" onclick="changeRole('${u.id}')">取消管理员</button>`}
                         ${u.role !== 'admin' ? `<button class="btn btn-xs" onclick="toggleUser('${u.id}')">${u.status === 'disabled' ? '启用' : '禁用'}</button>` : ''}
+                        ${u.role !== 'admin' ? `<button class="btn btn-xs" onclick="openResetPasswordModal('${u.id}','${u.username}')">重置密码</button>` : ''}
                         ${u.role !== 'admin' ? `<button class="btn btn-xs btn-danger" onclick="deleteUser('${u.id}')">删除</button>` : ''}
                     </td>
                 </tr>
@@ -307,6 +311,125 @@ async function deleteUser(id) {
         showToast('删除失败', 'error');
     }
 }
+
+// ========== 密码管理 ==========
+function openChangePasswordModal() {
+    closeUserMenu();
+    document.getElementById('cpOldPassword').value = '';
+    document.getElementById('cpNewPassword').value = '';
+    document.getElementById('cpConfirmPassword').value = '';
+    document.getElementById('changePasswordModal').classList.add('show');
+}
+
+function closeChangePasswordModal() {
+    document.getElementById('changePasswordModal').classList.remove('show');
+}
+
+async function submitChangePassword() {
+    const oldPwd = document.getElementById('cpOldPassword').value;
+    const newPwd = document.getElementById('cpNewPassword').value;
+    const confirmPwd = document.getElementById('cpConfirmPassword').value;
+    if (!oldPwd || !newPwd) { showToast('请填写完整', 'warning'); return; }
+    if (newPwd.length < 6) { showToast('新密码至少6位', 'warning'); return; }
+    if (newPwd !== confirmPwd) { showToast('两次输入的新密码不一致', 'warning'); return; }
+    try {
+        const res = await authFetch(`${API_BASE}/auth/change-password`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ old_password: oldPwd, new_password: newPwd })
+        });
+        const data = await res.json();
+        if (data.code === 0) {
+            showToast('密码修改成功', 'success');
+            closeChangePasswordModal();
+        } else {
+            showToast(data.message, 'error');
+        }
+    } catch (e) {
+        showToast('操作失败', 'error');
+    }
+}
+
+function openResetPasswordModal(id, username) {
+    document.getElementById('rpUserId').value = id;
+    document.getElementById('rpUsername').textContent = username;
+    document.getElementById('rpNewPassword').value = '';
+    document.getElementById('rpConfirmPassword').value = '';
+    document.getElementById('resetPasswordModal').classList.add('show');
+}
+
+async function submitResetPassword() {
+    const id = document.getElementById('rpUserId').value;
+    const newPwd = document.getElementById('rpNewPassword').value;
+    const confirmPwd = document.getElementById('rpConfirmPassword').value;
+    if (!newPwd) { showToast('请输入新密码', 'warning'); return; }
+    if (newPwd.length < 6) { showToast('密码至少6位', 'warning'); return; }
+    if (newPwd !== confirmPwd) { showToast('两次输入的密码不一致', 'warning'); return; }
+    try {
+        const res = await authFetch(`${API_BASE}/admin/users/${id}/reset-password`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ new_password: newPwd })
+        });
+        const data = await res.json();
+        if (data.code === 0) {
+            showToast(data.data, 'success');
+            document.getElementById('resetPasswordModal').classList.remove('show');
+        } else {
+            showToast(data.message, 'error');
+        }
+    } catch (e) {
+        showToast('操作失败', 'error');
+    }
+}
+
+// ========== 用户头像菜单 ==========
+function toggleUserMenu() {
+    document.getElementById('userDropdown').classList.toggle('show');
+}
+
+function closeUserMenu() {
+    const dd = document.getElementById('userDropdown');
+    if (dd) dd.classList.remove('show');
+}
+
+document.addEventListener('click', function(e) {
+    if (!e.target.closest('.user-menu')) closeUserMenu();
+});
+
+// ========== 个人信息 ==========
+function openProfileModal() {
+    closeUserMenu();
+    if (!currentUser) return;
+    const avatar = (currentUser.username || '?').charAt(0).toUpperCase();
+    const roleText = currentUser.role === 'admin' ? '管理员' : '普通用户';
+    const statusText = { pending: '待审批', active: '正常', disabled: '已禁用' }[currentUser.status] || currentUser.status || '-';
+
+    document.getElementById('profileAvatar').textContent = avatar;
+    document.getElementById('profileName').textContent = currentUser.username;
+    document.getElementById('profileRole').textContent = roleText;
+
+    const rows = [
+        ['用户名', currentUser.username],
+        ['角色', roleText],
+        ['状态', statusText],
+        ['描述', currentUser.description || '-'],
+        ['创建时间', fmtTime(currentUser.created_at)],
+        ['最后登录', currentUser.last_login_at ? fmtTime(currentUser.last_login_at) : '-'],
+    ];
+    document.getElementById('profileRows').innerHTML = rows.map(([k, v]) =>
+        `<div class="profile-row"><span class="profile-key">${k}</span><span class="profile-val">${escapeHtml(v)}</span></div>`
+    ).join('');
+    document.getElementById('profileModal').classList.add('show');
+}
+
+function closeProfileModal() {
+    document.getElementById('profileModal').classList.remove('show');
+}
+
+document.getElementById('profileModal').addEventListener('click', (e) => {
+    if (e.target.id === 'profileModal') closeProfileModal();
+});
 
 // 打开添加用户弹窗
 function openAddUserModal() {
@@ -465,11 +588,14 @@ function renderConnectionList(connections) {
                 ${conn.name}
             </div>
             <div class="conn-item-type">${getConnSubtitle(conn)}</div>
-            <div class="conn-item-actions" onclick="event.stopPropagation()">
-                ${conn.online
-                    ? `<button class="conn-action-btn btn-disconnect" onclick="disconnectConn('${conn.id}')" title="断开连接">断开</button>`
-                    : `<button class="conn-action-btn btn-connect" onclick="connectConn('${conn.id}')" title="建立连接">连接</button>`
-                }
+            <div class="conn-item-menu" onclick="event.stopPropagation()">
+                <button class="conn-menu-btn" onclick="toggleConnDropdown('${conn.id}')" title="操作">⋯</button>
+                <div class="conn-dropdown" id="connDrop-${conn.id}">
+                    <div class="dropdown-item" onclick="connAction('${conn.id}', 'toggle')">${conn.online ? '断开连接' : '连接'}</div>
+                    <div class="dropdown-item" onclick="connAction('${conn.id}', 'test')">测试连接</div>
+                    <div class="dropdown-item" onclick="connAction('${conn.id}', 'edit')">编辑</div>
+                    <div class="dropdown-item danger" onclick="connAction('${conn.id}', 'delete')">删除</div>
+                </div>
             </div>
         </div>
     `).join('');
@@ -519,14 +645,14 @@ async function connectConn(id) {
         const data = await res.json();
         if (data.code === 0) {
             showToast(data.data.message || '连接成功', 'success');
+            loadConnections();
+            await selectConnection(id);
         } else {
             showToast(data.message, 'error');
         }
     } catch (e) {
         showToast('连接失败: ' + e.message, 'error');
     }
-    loadConnections();
-    if (id === currentConnId) updateConnStatusDot(id);
 }
 
 // 更新工具栏连接状态指示灯
@@ -555,7 +681,7 @@ async function disconnectConn(id) {
             if (id === currentConnId) {
                 currentConnId = null;
                 document.getElementById('toolbar').style.display = 'none';
-                document.getElementById('workspace').style.display = 'none';
+                document.getElementById('queryPanel').style.display = 'none';
                 document.getElementById('welcome').style.display = 'flex';
             }
         } else {
@@ -586,6 +712,7 @@ async function selectConnection(id) {
             const conn = data.data;
             document.getElementById('currentConnName').textContent = conn.name;
             document.getElementById('currentConnType').textContent = getTypeLabel(conn.type);
+            document.getElementById('workspace').style.display = 'flex';
             document.getElementById('toolbar').style.display = 'flex';
             document.getElementById('welcome').style.display = 'none';
             document.getElementById('queryPanel').style.display = 'flex';
@@ -610,11 +737,14 @@ async function selectConnection(id) {
             } else {
                 document.getElementById('dbSelector').style.display = 'none';
                 currentDb = '';
-                loadTables(id);
+                await loadTables(id);
             }
+        } else {
+            showToast('加载连接失败：' + data.message, 'error');
         }
     } catch (e) {
-        showToast('加载连接信息失败', 'error');
+        showToast('加载连接信息失败：' + e.message, 'error');
+        console.error('selectConnection error:', e);
     }
 }
 
@@ -639,14 +769,15 @@ async function loadDatabases(connId, defaultDb) {
                 }
                 currentDb = select.value;
             }
-            loadTables(connId);
+            await loadTables(connId);
         } else {
             selector.style.display = 'none';
-            loadTables(connId);
+            await loadTables(connId);
         }
     } catch (e) {
         selector.style.display = 'none';
-        loadTables(connId);
+        console.error('loadDatabases error:', e);
+        await loadTables(connId);
     }
 }
 
@@ -690,11 +821,19 @@ async function loadTables(connId) {
         }
     } catch (e) {
         tableList.innerHTML = '<div style="color: #f53f3f; font-size: 13px;">加载失败</div>';
+        console.error('loadTables error:', e);
     }
 }
 
-function refreshTables() {
-    if (currentConnId) loadTables(currentConnId);
+// 刷新表：同时重新拉取数据库列表，保证新建/删除的库即时可见
+async function refreshTables() {
+    if (!currentConnId) return;
+    const type = getConnType();
+    if (type === 'MySQL' || type === 'PgSQL') {
+        await loadDatabases(currentConnId, currentDb);
+    } else {
+        await loadTables(currentConnId);
+    }
 }
 
 function insertTableName(tableName) {
@@ -835,7 +974,11 @@ async function editRow(idx) {
             .map(c => `\`${c}\` = ${quoteSqlVal(row[c])}`)
             .join(',\n    ');
         const where = `\`${pk}\` = ${quoteSqlVal(row[pk])}`;
-        const sql = `UPDATE \`${table}\`\nSET ${sets}\nWHERE ${where};`;
+        let qualifiedTable = `\`${table}\``;
+        if (getConnType() === 'MySQL' && currentDb) {
+            qualifiedTable = `\`${currentDb}\`.\`${table}\``;
+        }
+        const sql = `UPDATE ${qualifiedTable}\nSET ${sets}\nWHERE ${where};`;
         
         quickMode = 'execSql';
         openQuick(`更新行 - ${table}`);
@@ -856,8 +999,12 @@ async function deleteRow(idx) {
         const { pk } = await getTableColumns(table);
         if (!pk) { showToast('该表无主键，无法生成删除条件', 'warning'); return; }
         const where = `\`${pk}\` = ${quoteSqlVal(row[pk])}`;
-        if (!confirm(`确定要删除该记录吗？\n\nDELETE FROM ${table} WHERE ${where}`)) return;
-        const sql = `DELETE FROM \`${table}\` WHERE ${where};`;
+        let qualifiedTable = `\`${table}\``;
+        if (getConnType() === 'MySQL' && currentDb) {
+            qualifiedTable = `\`${currentDb}\`.\`${table}\``;
+        }
+        if (!confirm(`确定要删除该记录吗？\n\nDELETE FROM ${qualifiedTable} WHERE ${where}`)) return;
+        const sql = `DELETE FROM ${qualifiedTable} WHERE ${where};`;
         const res = await authFetch(`${API_BASE}/connections/query`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1083,6 +1230,90 @@ async function deleteCurrentConnection() {
     }
 }
 
+function toggleConnDropdown(connId) {
+    document.querySelectorAll('.conn-dropdown.show').forEach(el => {
+        if (el.id !== 'connDrop-' + connId) el.classList.remove('show');
+    });
+    const menu = document.getElementById('connDrop-' + connId);
+    if (menu) menu.classList.toggle('show');
+}
+
+function closeAllConnDropdowns() {
+    document.querySelectorAll('.conn-dropdown.show').forEach(el => el.classList.remove('show'));
+}
+
+async function connAction(connId, action) {
+    closeAllConnDropdowns();
+    switch (action) {
+        case 'toggle': {
+            const item = document.querySelector(`#connDrop-${connId}`);
+            const text = item.querySelector('.dropdown-item').textContent;
+            if (text.includes('断开')) {
+                await disconnectConn(connId);
+            } else {
+                await connectConn(connId);
+            }
+            break;
+        }
+        case 'test': {
+            try {
+                const res = await authFetch(`${API_BASE}/connections/${connId}`);
+                const data = await res.json();
+                if (data.code === 0) {
+                    const testRes = await authFetch(`${API_BASE}/connections/test`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(data.data)
+                    });
+                    const testData = await testRes.json();
+                    if (testData.code === 0) {
+                        const result = testData.data;
+                        if (result.success) {
+                            showToast(`连接成功！延迟 ${result.latency_ms}ms`, 'success');
+                        } else {
+                            showToast(`连接失败：${result.message}`, 'error');
+                        }
+                    } else {
+                        showToast(testData.message, 'error');
+                    }
+                }
+            } catch (e) {
+                showToast('测试失败：' + e.message, 'error');
+            }
+            break;
+        }
+        case 'edit':
+            editConnection(connId);
+            break;
+        case 'delete': {
+            if (connId === currentConnId) {
+                deleteCurrentConnection();
+            } else {
+                if (!confirm('确定要删除这个连接吗？')) return;
+                try {
+                    const res = await authFetch(`${API_BASE}/connections/${connId}`, { method: 'DELETE' });
+                    const data = await res.json();
+                    if (data.code === 0) {
+                        showToast('删除成功', 'success');
+                        loadConnections();
+                    } else {
+                        showToast(data.message, 'error');
+                    }
+                } catch (e) {
+                    showToast('删除失败：' + e.message, 'error');
+                }
+            }
+            break;
+        }
+    }
+}
+
+document.addEventListener('click', function(e) {
+    if (!e.target.closest('.conn-item-menu')) {
+        closeAllConnDropdowns();
+    }
+});
+
 function showToast(message, type = 'info') {
     const toast = document.getElementById('toast');
     toast.textContent = message;
@@ -1103,6 +1334,13 @@ function selectTable(table) {
 
 function getConnType() {
     return document.getElementById('currentConnType').textContent;
+}
+
+function dbQueryPart() {
+    if (currentDb && getConnType() === 'MySQL') {
+        return `db=${encodeURIComponent(currentDb)}`;
+    }
+    return '';
 }
 
 function openQuick(title) {
@@ -1316,7 +1554,8 @@ async function quickDropTable() {
     if (!currentTable) { showToast('请先选择一个表', 'warning'); return; }
     if (!confirm(`确定要删除 "${currentTable}" 吗？此操作不可恢复！`)) return;
     try {
-        const res = await authFetch(`${API_BASE}/quick/${currentConnId}/table?name=${encodeURIComponent(currentTable)}`, { method: 'DELETE' });
+        const dp = dbQueryPart();
+        const res = await authFetch(`${API_BASE}/quick/${currentConnId}/table?name=${encodeURIComponent(currentTable)}${dp ? '&' + dp : ''}`, { method: 'DELETE' });
         const data = await res.json();
         if (data.code === 0) {
             showToast('删除成功', 'success');
@@ -1366,14 +1605,16 @@ async function quickSubmit() {
                 if (cols.length === 0) { showToast('至少需要一列', 'warning'); return; }
                 body.columns = cols;
             }
-            url = `${API_BASE}/quick/${currentConnId}/table`;
+            const dp1 = dbQueryPart();
+            url = `${API_BASE}/quick/${currentConnId}/table${dp1 ? '?' + dp1 : ''}`;
             break;
         }
         case 'insertRow': {
             body.table = qtable;
             body.data = readKv('kvRows');
             if (Object.keys(body.data).length === 0) { showToast('请至少填写一个字段', 'warning'); return; }
-            url = `${API_BASE}/quick/${currentConnId}/row`;
+            const dp2 = dbQueryPart();
+            url = `${API_BASE}/quick/${currentConnId}/row${dp2 ? '?' + dp2 : ''}`;
             break;
         }
         case 'updateRow': {
@@ -1382,7 +1623,8 @@ async function quickSubmit() {
             body.where = readKv('kvWhere');
             if (Object.keys(body.data).length === 0) { showToast('请填写要更新的字段', 'warning'); return; }
             if (Object.keys(body.where).length === 0) { showToast('请填写更新条件', 'warning'); return; }
-            url = `${API_BASE}/quick/${currentConnId}/row`;
+            const dp3 = dbQueryPart();
+            url = `${API_BASE}/quick/${currentConnId}/row${dp3 ? '?' + dp3 : ''}`;
             method = 'PUT';
             break;
         }
@@ -1390,7 +1632,8 @@ async function quickSubmit() {
             body.table = qtable;
             body.where = readKv('kvWhere');
             if (Object.keys(body.where).length === 0) { showToast('请填写删除条件', 'warning'); return; }
-            url = `${API_BASE}/quick/${currentConnId}/row`;
+            const dp4 = dbQueryPart();
+            url = `${API_BASE}/quick/${currentConnId}/row${dp4 ? '?' + dp4 : ''}`;
             method = 'DELETE';
             break;
         }
@@ -1401,7 +1644,8 @@ async function quickSubmit() {
             body.index_name = document.getElementById('qIndexName').value.trim();
             body.columns = cols.split(',').map(c => c.trim()).filter(Boolean);
             body.unique = document.getElementById('qIndexUnique').checked;
-            url = `${API_BASE}/quick/${currentConnId}/index`;
+            const dp5 = dbQueryPart();
+            url = `${API_BASE}/quick/${currentConnId}/index${dp5 ? '?' + dp5 : ''}`;
             break;
         }
         case 'renameTable': {

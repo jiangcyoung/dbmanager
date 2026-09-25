@@ -90,3 +90,31 @@ func Me(w http.ResponseWriter, r *http.Request) {
 	}
 	Success(w, user.ToPublic())
 }
+
+// ChangePassword 用户修改自己的密码
+func ChangePassword(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var req struct {
+		OldPassword string `json:"old_password"`
+		NewPassword string `json:"new_password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		Error(w, 400, "参数错误")
+		return
+	}
+	user := middleware.UserFromContext(r.Context())
+	if user == nil {
+		Error(w, 401, "未登录")
+		return
+	}
+	ip := middleware.ClientIP(r)
+	ua := middleware.UserAgent(r)
+
+	if err := auth.ChangePassword(user.ID, req.OldPassword, req.NewPassword); err != nil {
+		audit.GetLogger().Record(user.Username, string(user.Role), "change_password_failed", "auth", err.Error(), ip, ua)
+		Error(w, 400, err.Error())
+		return
+	}
+	audit.GetLogger().Record(user.Username, string(user.Role), "change_password", "auth", "修改密码成功", ip, ua)
+	Success(w, "密码修改成功")
+}

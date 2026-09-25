@@ -130,7 +130,7 @@ func (d *MongoDriver) Execute(sql string, collection string) (*model.QueryResult
 	}, nil
 }
 
-func (d *MongoDriver) ListTables() ([]string, error) {
+func (d *MongoDriver) ListTables(_ string) ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 

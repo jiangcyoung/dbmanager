@@ -66,7 +66,7 @@ func (d *PostgresDriver) Execute(sql string, _ string) (*model.QueryResult, erro
 	}, nil
 }
 
-func (d *PostgresDriver) ListTables() ([]string, error) {
+func (d *PostgresDriver) ListTables(dbName string) ([]string, error) {
 	rows, err := d.db.Query(`
 		SELECT tablename FROM pg_tables 
 		WHERE schemaname = 'public' 

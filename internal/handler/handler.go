@@ -288,13 +288,17 @@ func ListTables(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	driver, err := db.GetManager().GetConnection(*conn)
+	driver, err := db.GetManager().GetActiveConnection(conn.ID)
 	if err != nil {
-		Error(w, 500, "连接失败: "+err.Error())
+		if err == db.ErrNotConnected {
+			Error(w, 400, err.Error())
+		} else {
+			Error(w, 500, "连接失败: "+err.Error())
+		}
 		return
 	}
 
-	tables, err := driver.ListTables()
+	tables, err := driver.ListTables("")
 	if err != nil {
 		Error(w, 500, "获取表列表失败: "+err.Error())
 		return
@@ -328,9 +332,13 @@ func ExecuteQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	driver, err := db.GetManager().GetConnection(*conn)
+	driver, err := db.GetManager().GetActiveConnection(conn.ID)
 	if err != nil {
-		Error(w, 500, "连接失败: "+err.Error())
+		if err == db.ErrNotConnected {
+			Error(w, 400, err.Error())
+		} else {
+			Error(w, 500, "连接失败: "+err.Error())
+		}
 		return
 	}
 

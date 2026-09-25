@@ -3,6 +3,7 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"dbmanager/internal/model"
@@ -66,8 +67,15 @@ func (d *MySQLDriver) Execute(sql string, _ string) (*model.QueryResult, error) 
 	}, nil
 }
 
-func (d *MySQLDriver) ListTables() ([]string, error) {
-	rows, err := d.db.Query("SHOW TABLES")
+func (d *MySQLDriver) ListTables(dbName string) ([]string, error) {
+	var rows *sql.Rows
+	var err error
+	if dbName != "" {
+		safe := "`" + strings.ReplaceAll(dbName, "`", "``") + "`"
+		rows, err = d.db.Query("SHOW TABLES FROM " + safe)
+	} else {
+		rows, err = d.db.Query("SHOW TABLES")
+	}
 	if err != nil {
 		return nil, err
 	}

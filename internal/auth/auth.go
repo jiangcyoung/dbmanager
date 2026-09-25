@@ -124,3 +124,47 @@ func GetUserByToken(token string) *model.User {
 	}
 	return &sess.User
 }
+
+// ChangePassword 用户修改自己的密码（需验证旧密码）
+func ChangePassword(userID, oldPassword, newPassword string) error {
+	if len(newPassword) < 6 {
+		return ErrInvalidPassword
+	}
+	store := GetStore()
+	user := store.GetByID(userID)
+	if user == nil {
+		return ErrUserNotFound
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(oldPassword)); err != nil {
+		return ErrWrongPassword
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	return store.Update(userID, func(u *model.User) {
+		u.PasswordHash = string(hash)
+	})
+}
+
+// ResetPassword 管理员重置用户密码（无需旧密码）
+func ResetPassword(adminID, targetUserID, newPassword string) error {
+	if len(newPassword) < 6 {
+		return ErrInvalidPassword
+	}
+	store := GetStore()
+	target := store.GetByID(targetUserID)
+	if target == nil {
+		return ErrUserNotFound
+	}
+	if target.Role == model.RoleAdmin {
+		return errors.New("不能重置管理员密码")
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	return store.Update(targetUserID, func(u *model.User) {
+		u.PasswordHash = string(hash)
+	})
+}

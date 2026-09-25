@@ -123,7 +123,7 @@ func (d *RedisDriver) Execute(sql string, collection string) (*model.QueryResult
 	}, nil
 }
 
-func (d *RedisDriver) ListTables() ([]string, error) {
+func (d *RedisDriver) ListTables(_ string) ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 

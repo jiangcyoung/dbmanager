@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DB Manager - 数据库连接管理</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=20260927">
     <script>
         (function() {
             const THEME_KEY = 'dbmanager-theme';
@@ -84,11 +84,21 @@
                         <option value="light">浅色</option>
                         <option value="dark">深色</option>
                     </select>
-                    <span class="user-info">
-                        <span class="user-role" id="userRole">admin</span>
-                        <span class="user-name" id="userName">admin</span>
-                    </span>
-                    <button class="btn btn-sm" onclick="logout()">退出</button>
+                    <div class="user-menu" id="userMenu">
+                        <button class="user-menu-btn" onclick="toggleUserMenu()" title="账户菜单">
+                            <span class="user-avatar" id="userAvatar">A</span>
+                            <span class="user-meta">
+                                <span class="user-name" id="userName">admin</span>
+                                <span class="user-role" id="userRole">admin</span>
+                            </span>
+                            <span class="user-caret">▾</span>
+                        </button>
+                        <div class="user-dropdown" id="userDropdown">
+                            <div class="dropdown-item" onclick="openProfileModal()">👤 个人信息</div>
+                            <div class="dropdown-item" onclick="openChangePasswordModal()">🔑 修改密码</div>
+                            <div class="dropdown-item danger" onclick="logout()">🚪 退出登录</div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -100,9 +110,7 @@
                 </div>
                 <div class="toolbar-actions">
                     <button class="btn btn-sm" onclick="refreshTables()">刷新表</button>
-                    <button class="btn btn-sm btn-warning" onclick="testCurrentConnection()">测试连接</button>
-                    <button class="btn btn-sm btn-primary" onclick="toggleOptimizePanel()">⚡ 数据库优化</button>
-                    <button class="btn btn-sm btn-danger" onclick="deleteCurrentConnection()">删除</button>
+                    <button class="btn btn-sm btn-primary" onclick="toggleOptimizePanel()">⚡ 优化</button>
                 </div>
             </div>
 
@@ -356,6 +364,82 @@
         </div>
     </div>
 
+    <div class="modal" id="changePasswordModal">
+        <div class="modal-content" style="max-width:400px;">
+            <div class="modal-header">
+                <h2>修改密码</h2>
+                <button class="close-btn" onclick="closeChangePasswordModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>当前密码</label>
+                    <input type="password" id="cpOldPassword" placeholder="请输入当前密码" autocomplete="current-password">
+                </div>
+                <div class="form-group">
+                    <label>新密码</label>
+                    <input type="password" id="cpNewPassword" placeholder="至少6位" autocomplete="new-password">
+                </div>
+                <div class="form-group">
+                    <label>确认新密码</label>
+                    <input type="password" id="cpConfirmPassword" placeholder="再次输入新密码" autocomplete="new-password">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeChangePasswordModal()">取消</button>
+                <button class="btn btn-primary" onclick="submitChangePassword()">确认修改</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="resetPasswordModal">
+        <div class="modal-content" style="max-width:380px;">
+            <div class="modal-header">
+                <h2>重置密码</h2>
+                <button class="close-btn" onclick="document.getElementById('resetPasswordModal').classList.remove('show')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="margin-bottom:12px;color:var(--text-secondary);">为用户 <strong id="rpUsername"></strong> 设置新密码</p>
+                <input type="hidden" id="rpUserId">
+                <div class="form-group">
+                    <label>新密码</label>
+                    <input type="password" id="rpNewPassword" placeholder="至少6位" autocomplete="new-password">
+                </div>
+                <div class="form-group">
+                    <label>确认新密码</label>
+                    <input type="password" id="rpConfirmPassword" placeholder="再次输入新密码" autocomplete="new-password">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="document.getElementById('resetPasswordModal').classList.remove('show')">取消</button>
+                <button class="btn btn-primary" onclick="submitResetPassword()">确认重置</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 个人信息弹窗 -->
+    <div class="modal" id="profileModal">
+        <div class="modal-content" style="max-width:420px;">
+            <div class="modal-header">
+                <h2>个人信息</h2>
+                <button class="close-btn" onclick="closeProfileModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="profile-header">
+                    <span class="user-avatar user-avatar-lg" id="profileAvatar">A</span>
+                    <div>
+                        <div class="profile-name" id="profileName">-</div>
+                        <div class="profile-role" id="profileRole">-</div>
+                    </div>
+                </div>
+                <div class="profile-rows" id="profileRows"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeProfileModal()">关闭</button>
+                <button class="btn btn-primary" onclick="closeProfileModal(); openChangePasswordModal();">修改密码</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         (function() {
             const themeSwitch = document.getElementById('themeSwitch');
@@ -367,6 +451,6 @@
             }
         })();
     </script>
-    <script src="app.js"></script>
+    <script src="app.js?v=20260927"></script>
 </body>
 </html>

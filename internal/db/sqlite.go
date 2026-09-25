@@ -63,7 +63,7 @@ func (d *SQLiteDriver) Execute(sql string, _ string) (*model.QueryResult, error)
 	}, nil
 }
 
-func (d *SQLiteDriver) ListTables() ([]string, error) {
+func (d *SQLiteDriver) ListTables(_ string) ([]string, error) {
 	rows, err := d.db.Query(`
 		SELECT name FROM sqlite_master 
 		WHERE type='table' AND name NOT LIKE 'sqlite_%'

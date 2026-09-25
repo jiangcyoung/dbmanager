@@ -199,6 +199,42 @@ func DeleteUser(w http.ResponseWriter, r *http.Request) {
 	Success(w, "删除成功")
 }
 
+// ResetPassword 管理员重置用户密码
+func ResetPassword(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/api/admin/users/")
+	id = strings.TrimSuffix(id, "/reset-password")
+	if id == "" {
+		Error(w, 400, "用户ID不能为空")
+		return
+	}
+	var req struct {
+		NewPassword string `json:"new_password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		Error(w, 400, "参数错误")
+		return
+	}
+	admin := middleware.UserFromContext(r.Context())
+	ip := middleware.ClientIP(r)
+	ua := middleware.UserAgent(r)
+
+	store := auth.GetStore()
+	target := store.GetByID(id)
+	if target == nil {
+		Error(w, 404, "用户不存在")
+		return
+	}
+
+	if err := auth.ResetPassword(admin.ID, id, req.NewPassword); err != nil {
+		audit.GetLogger().Record(admin.Username, string(admin.Role), "reset_password_failed", "user", err.Error()+" (目标: "+target.Username+")", ip, ua)
+		Error(w, 400, err.Error())
+		return
+	}
+	audit.GetLogger().Record(admin.Username, string(admin.Role), "reset_password", "user",
+		"重置用户密码: "+target.Username, ip, ua)
+	Success(w, "已重置 "+target.Username+" 的密码")
+}
+
 // AuditLogs 查询审计日志
 func AuditLogs(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
