@@ -1,0 +1,33 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+dbmanager
+dbmanager.exe
+
+# Test binary
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Workspace
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Data
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

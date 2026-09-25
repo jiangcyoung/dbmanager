@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DB Manager - 数据库连接管理</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app">
+        <!-- 左侧边栏 -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h1>DB Manager</h1>
+                <button class="btn btn-primary btn-sm" onclick="openAddModal()">
+                    + 新建连接
+                </button>
+            </div>
+            <div class="connection-list" id="connectionList">
+                <!-- 连接列表动态生成 -->
+            </div>
+        </aside>
+
+        <!-- 主内容区 -->
+        <main class="main-content">
+            <div class="toolbar" id="toolbar" style="display: none;">
+                <div class="conn-info">
+                    <span class="conn-name" id="currentConnName">-</span>
+                    <span class="conn-type" id="currentConnType">-</span>
+                </div>
+                <div class="toolbar-actions">
+                    <button class="btn btn-sm" onclick="refreshTables()">刷新表</button>
+                    <button class="btn btn-sm btn-warning" onclick="testCurrentConnection()">测试连接</button>
+                    <button class="btn btn-sm btn-danger" onclick="deleteCurrentConnection()">删除</button>
+                </div>
+            </div>
+
+            <div class="workspace" id="workspace">
+                <div class="welcome" id="welcome">
+                    <div class="welcome-icon">🗄️</div>
+                    <h2>欢迎使用 DB Manager</h2>
+                    <p>从左侧选择一个数据库连接，或创建新的连接开始使用</p>
+                    <button class="btn btn-primary" onclick="openAddModal()">创建第一个连接</button>
+                </div>
+
+                <div class="query-panel" id="queryPanel" style="display: none;">
+                    <div class="tables-sidebar">
+                        <div class="tables-sidebar-header">
+                            <h3>表列表</h3>
+                            <div class="table-actions">
+                                <button class="btn btn-sm" id="btnNewDb" onclick="quickCreateDatabase()" title="新建数据库" style="display: none;">＋库</button>
+                                <button class="btn btn-sm" id="btnNewTable" onclick="quickCreateTable()" title="新建表/集合" style="display: none;">＋表</button>
+                            </div>
+                        </div>
+                        <div class="db-selector" id="dbSelector" style="display: none;">
+                            <label>数据库</label>
+                            <select id="dbSelect" onchange="onDbChange()"></select>
+                        </div>
+                        <div class="table-list" id="tableList">
+                            <div class="loading">加载中...</div>
+                        </div>
+                    </div>
+                    <div class="query-main">
+                        <div class="query-editor">
+                            <div class="editor-header">
+                                <span class="editor-label">SQL 查询</span>
+                                <select id="connQuickSwitch" class="conn-quick-switch" onchange="quickSwitchConn()" title="快速切换连接"></select>
+                                <div class="editor-actions">
+                                    <input type="text" id="collectionInput" placeholder="集合名 (MongoDB)" style="display: none; width: 150px; margin-right: 8px;">
+                                    <button class="btn btn-primary btn-sm" onclick="executeQuery()">▶ 执行</button>
+                                </div>
+                            </div>
+                            <textarea id="sqlEditor" placeholder="输入 SQL 语句..."></textarea>
+                        </div>
+                        <div class="query-result">
+                            <div class="result-header">
+                                <span id="resultInfo">执行结果</span>
+                            </div>
+                            <div class="result-content" id="resultContent">
+                                <div class="empty-result">执行查询后显示结果</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- 添加/编辑连接弹窗 -->
+    <div class="modal" id="connModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalTitle">新建连接</h2>
+                <button class="close-btn" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="connForm">
+                    <input type="hidden" id="connId">
+                    
+                    <div class="form-group">
+                        <label>连接名称 *</label>
+                        <input type="text" id="connName" required placeholder="例如：生产数据库">
+                    </div>
+
+                    <div class="form-group">
+                        <label>数据库类型 *</label>
+                        <select id="connType" required onchange="onTypeChange()">
+                            <option value="mysql">MySQL</option>
+                            <option value="postgres">PostgreSQL</option>
+                            <option value="sqlite">SQLite</option>
+                            <option value="mongodb">MongoDB</option>
+                            <option value="redis">Redis</option>
+                        </select>
+                    </div>
+
+                    <div class="form-row" id="hostPortRow">
+                        <div class="form-group">
+                            <label>主机地址 *</label>
+                            <input type="text" id="connHost" value="localhost" placeholder="localhost">
+                        </div>
+                        <div class="form-group">
+                            <label>端口 *</label>
+                            <input type="number" id="connPort" value="3306">
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>用户名</label>
+                            <input type="text" id="connUsername" placeholder="root">
+                        </div>
+                        <div class="form-group">
+                            <label>密码</label>
+                            <input type="password" id="connPassword" placeholder="password">
+                        </div>
+                    </div>
+
+                    <div class="form-group" id="dbGroup">
+                        <label>数据库名</label>
+                        <input type="text" id="connDatabase" placeholder="mydb">
+                    </div>
+
+                    <div class="form-group" id="fileGroup" style="display: none;">
+                        <label>SQLite 文件路径</label>
+                        <input type="text" id="connFilePath" placeholder="/data/test.db">
+                    </div>
+
+                    <div class="form-group" id="dbIndexGroup" style="display: none;">
+                        <label>Redis DB 索引</label>
+                        <input type="number" id="connDBIndex" value="0">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="testConnection()">测试连接</button>
+                <button class="btn" onclick="closeModal()">取消</button>
+                <button class="btn btn-primary" onclick="saveConnection()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast 提示 -->
+    <div class="toast" id="toast"></div>
+
+    <!-- 快捷操作弹窗 -->
+    <div class="modal" id="quickModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="quickModalTitle">快捷操作</h2>
+                <button class="close-btn" onclick="closeQuickModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="quickFormContainer">
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeQuickModal()">取消</button>
+                <button class="btn btn-primary" id="quickSubmitBtn" onclick="quickSubmit()">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

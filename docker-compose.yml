@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  dbmanager:
+    build: .
+    container_name: dbmanager
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - TZ=Asia/Shanghai
+    volumes:
+      - dbmanager_data:/app/data
+    restart: unless-stopped
+
+volumes:
+  dbmanager_data:
