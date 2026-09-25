@@ -1,5 +1,79 @@
 package model
 
+import "time"
+
+// Role 用户角色
+type Role string
+
+const (
+	RoleAdmin Role = "admin"
+	RoleUser  Role = "user"
+)
+
+// UserStatus 用户状态
+type UserStatus string
+
+const (
+	StatusPending  UserStatus = "pending"
+	StatusActive   UserStatus = "active"
+	StatusDisabled UserStatus = "disabled"
+)
+
+// User 系统用户
+type User struct {
+	ID           string     `json:"id"`
+	Username     string     `json:"username"`
+	PasswordHash string     `json:"password_hash"`
+	Role         Role       `json:"role"`
+	Status       UserStatus `json:"status"`
+	CreatedAt    time.Time  `json:"created_at"`
+	LastLoginAt  *time.Time `json:"last_login_at,omitempty"`
+}
+
+// PublicUser 对外暴露的用户信息（不含密码）
+type PublicUser struct {
+	ID          string     `json:"id"`
+	Username    string     `json:"username"`
+	Role        Role       `json:"role"`
+	Status      UserStatus `json:"status"`
+	CreatedAt   time.Time  `json:"created_at"`
+	LastLoginAt *time.Time `json:"last_login_at,omitempty"`
+}
+
+// ToPublic 转换为公开信息
+func (u *User) ToPublic() PublicUser {
+	return PublicUser{
+		ID:          u.ID,
+		Username:    u.Username,
+		Role:        u.Role,
+		Status:      u.Status,
+		CreatedAt:   u.CreatedAt,
+		LastLoginAt: u.LastLoginAt,
+	}
+}
+
+// AuditLog 审计日志条目
+type AuditLog struct {
+	ID        string    `json:"id"`
+	Time      time.Time `json:"time"`
+	Username  string    `json:"username"`
+	Role      string    `json:"role"`
+	Action    string    `json:"action"`
+	Resource  string    `json:"resource"`
+	Detail    string    `json:"detail"`
+	IP        string    `json:"ip"`
+	UserAgent string    `json:"user_agent"`
+}
+
+// OnlineUser 在线用户
+type OnlineUser struct {
+	Username   string    `json:"username"`
+	Role       string    `json:"role"`
+	LoginAt    time.Time `json:"login_at"`
+	LastActive time.Time `json:"last_active"`
+	IP         string    `json:"ip"`
+}
+
 // DBType 数据库类型
 type DBType string
 

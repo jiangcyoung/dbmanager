@@ -8,11 +8,22 @@ import (
 	"dbmanager/internal/model"
 )
 
+// AdminConfig 管理员配置
+type AdminConfig struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
 // Config 应用配置
 type Config struct {
-	Port        string               `json:"port"`
-	DataFile    string               `json:"data_file"`
-	Connections []model.DBConnection `json:"connections"`
+	Port                 string               `json:"port"`
+	DataDir              string               `json:"data_dir"`
+	ConnectionsFile      string               `json:"connections_file"`
+	UsersFile            string               `json:"users_file"`
+	AuditLogFile         string               `json:"audit_log_file"`
+	SessionTimeoutMin    int                  `json:"session_timeout_minutes"`
+	Admin                AdminConfig          `json:"admin"`
+	Connections          []model.DBConnection `json:"-"`
 }
 
 var (
@@ -25,19 +36,62 @@ var (
 func GetConfig() *Config {
 	once.Do(func() {
 		cfg = &Config{
-			Port:     "8080",
-			DataFile: "data/connections.json",
+			Port:              "8080",
+			DataDir:           "data",
+			ConnectionsFile:   "data/connections.json",
+			UsersFile:         "data/users.json",
+			AuditLogFile:      "data/audit.log",
+			SessionTimeoutMin: 120,
+			Admin: AdminConfig{
+				Username: "admin",
+				Password: "admin123",
+			},
 		}
-		cfg.load()
+		cfg.loadSystem()
+		cfg.loadConnections()
 	})
 	return cfg
 }
 
-// load 从文件加载配置
-func (c *Config) load() {
-	data, err := os.ReadFile(c.DataFile)
+// loadSystem 从 config.json 加载系统配置
+func (c *Config) loadSystem() {
+	data, err := os.ReadFile("config.json")
 	if err != nil {
-		// 文件不存在，使用空配置
+		return
+	}
+	_ = json.Unmarshal(data, c)
+	// 确保默认值
+	if c.Port == "" {
+		c.Port = "8080"
+	}
+	if c.DataDir == "" {
+		c.DataDir = "data"
+	}
+	if c.ConnectionsFile == "" {
+		c.ConnectionsFile = c.DataDir + "/connections.json"
+	}
+	if c.UsersFile == "" {
+		c.UsersFile = c.DataDir + "/users.json"
+	}
+	if c.AuditLogFile == "" {
+		c.AuditLogFile = c.DataDir + "/audit.log"
+	}
+	if c.SessionTimeoutMin <= 0 {
+		c.SessionTimeoutMin = 120
+	}
+	if c.Admin.Username == "" {
+		c.Admin.Username = "admin"
+	}
+	if c.Admin.Password == "" {
+		c.Admin.Password = "admin123"
+	}
+	_ = os.MkdirAll(c.DataDir, 0755)
+}
+
+// loadConnections 从文件加载连接
+func (c *Config) loadConnections() {
+	data, err := os.ReadFile(c.ConnectionsFile)
+	if err != nil {
 		return
 	}
 	var conns []model.DBConnection
@@ -46,27 +100,23 @@ func (c *Config) load() {
 	}
 }
 
-// Save 保存配置到文件
-func (c *Config) Save() error {
+// SaveConnections 保存连接到文件
+func (c *Config) SaveConnections() error {
 	mu.Lock()
 	defer mu.Unlock()
 
-	dir := "data"
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		os.MkdirAll(dir, 0755)
-	}
+	_ = os.MkdirAll(c.DataDir, 0755)
 	data, err := json.MarshalIndent(c.Connections, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(c.DataFile, data, 0644)
+	return os.WriteFile(c.ConnectionsFile, data, 0644)
 }
 
 // GetConnections 获取所有连接
 func (c *Config) GetConnections() []model.DBConnection {
 	mu.RLock()
 	defer mu.RUnlock()
-	// 返回副本，不暴露密码
 	result := make([]model.DBConnection, len(c.Connections))
 	for i, conn := range c.Connections {
 		result[i] = conn
@@ -93,7 +143,7 @@ func (c *Config) AddConnection(conn model.DBConnection) error {
 	mu.Lock()
 	c.Connections = append(c.Connections, conn)
 	mu.Unlock()
-	return c.Save()
+	return c.SaveConnections()
 }
 
 // UpdateConnection 更新连接
@@ -107,7 +157,7 @@ func (c *Config) UpdateConnection(id string, conn model.DBConnection) error {
 		}
 	}
 	mu.Unlock()
-	return c.Save()
+	return c.SaveConnections()
 }
 
 // DeleteConnection 删除连接
@@ -120,5 +170,5 @@ func (c *Config) DeleteConnection(id string) error {
 		}
 	}
 	mu.Unlock()
-	return c.Save()
+	return c.SaveConnections()
 }

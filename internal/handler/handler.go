@@ -5,12 +5,25 @@ import (
 	"net/http"
 	"strings"
 
+	"dbmanager/internal/audit"
 	"dbmanager/internal/config"
 	"dbmanager/internal/db"
+	"dbmanager/internal/middleware"
 	"dbmanager/internal/model"
 
 	"github.com/google/uuid"
 )
+
+// auditRecord 记录当前用户的操作审计日志
+func auditRecord(r *http.Request, action, resource, detail string) {
+	user := middleware.UserFromContext(r.Context())
+	username, role := "anonymous", ""
+	if user != nil {
+		username = user.Username
+		role = string(user.Role)
+	}
+	audit.GetLogger().Record(username, role, action, resource, detail, middleware.ClientIP(r), middleware.UserAgent(r))
+}
 
 // Response 统一响应
 func Response(w http.ResponseWriter, code int, message string, data interface{}) {
@@ -79,6 +92,7 @@ func AddConnection(w http.ResponseWriter, r *http.Request) {
 		Error(w, 500, "保存失败: "+err.Error())
 		return
 	}
+	auditRecord(r, "create_connection", "connection", "创建连接: "+conn.Name+" ("+string(conn.Type)+")")
 	Success(w, conn.ID)
 }
 
@@ -112,6 +126,7 @@ func UpdateConnection(w http.ResponseWriter, r *http.Request) {
 	}
 	// 关闭旧连接
 	db.GetManager().CloseConnection(id)
+	auditRecord(r, "update_connection", "connection", "更新连接: "+conn.Name)
 	Success(w, nil)
 }
 
@@ -123,11 +138,17 @@ func DeleteConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg := config.GetConfig()
+	conn := cfg.GetConnectionByID(id)
 	if err := cfg.DeleteConnection(id); err != nil {
 		Error(w, 500, "删除失败: "+err.Error())
 		return
 	}
 	db.GetManager().CloseConnection(id)
+	name := ""
+	if conn != nil {
+		name = conn.Name
+	}
+	auditRecord(r, "delete_connection", "connection", "删除连接: "+name)
 	Success(w, nil)
 }
 
@@ -149,6 +170,7 @@ func TestConnection(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	result := db.GetManager().TestConnection(conn)
+	auditRecord(r, "test_connection", "connection", "测试连接: "+conn.Name)
 	Success(w, result)
 }
 
@@ -230,5 +252,11 @@ func ExecuteQuery(w http.ResponseWriter, r *http.Request) {
 		Error(w, 500, "执行失败: "+err.Error())
 		return
 	}
+	// 审计：记录 SQL 执行（截断过长的 SQL）
+	sqlPreview := req.SQL
+	if len(sqlPreview) > 200 {
+		sqlPreview = sqlPreview[:200] + "..."
+	}
+	auditRecord(r, "execute_query", "query", sqlPreview)
 	Success(w, result)
 }

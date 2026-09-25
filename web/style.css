@@ -716,3 +716,344 @@ body {
     background: #ffece8;
     border-color: #f53f3f;
 }
+
+/* ============ 登录页 ============ */
+.auth-page {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+}
+.auth-card {
+    background: #fff;
+    border-radius: 12px;
+    padding: 40px 36px;
+    width: 360px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+}
+.auth-logo {
+    text-align: center;
+    font-size: 24px;
+    font-weight: 700;
+    color: #1d2129;
+    margin-bottom: 28px;
+}
+.auth-tabs {
+    display: flex;
+    border-bottom: 2px solid #e5e6eb;
+    margin-bottom: 24px;
+}
+.auth-tab {
+    flex: 1;
+    padding: 10px 0;
+    background: none;
+    border: none;
+    font-size: 15px;
+    color: #86909c;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+}
+.auth-tab.active {
+    color: #3370ff;
+    border-bottom-color: #3370ff;
+    font-weight: 600;
+}
+.auth-hint {
+    min-height: 20px;
+    font-size: 13px;
+    margin: 8px 0;
+}
+.auth-hint.error { color: #f53f3f; }
+.auth-hint.success { color: #00b42a; }
+.auth-footer {
+    text-align: center;
+    font-size: 12px;
+    color: #86909c;
+    margin-top: 20px;
+}
+.btn-block { width: 100%; margin-top: 8px; }
+
+/* ============ 顶栏 ============ */
+.topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px;
+    background: #fff;
+    border-bottom: 1px solid #e5e6eb;
+    min-height: 48px;
+}
+.topbar-left {
+    font-size: 16px;
+    font-weight: 600;
+    color: #1d2129;
+}
+.topbar-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+.online-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 12px;
+    background: #e8ffea;
+    color: #00b42a;
+    border-radius: 12px;
+    font-size: 13px;
+    cursor: pointer;
+}
+.online-badge b { font-weight: 600; }
+.user-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.user-role {
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: #e8f3ff;
+    color: #3370ff;
+}
+.user-name {
+    font-size: 14px;
+    color: #1d2129;
+    font-weight: 500;
+}
+
+/* ============ 系统管理（侧边栏） ============ */
+.admin-section {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid #e5e6eb;
+}
+.admin-section-title {
+    padding: 0 16px 8px;
+    font-size: 12px;
+    color: #86909c;
+    font-weight: 600;
+    letter-spacing: 1px;
+}
+.admin-nav-item {
+    padding: 10px 16px;
+    font-size: 14px;
+    color: #4e5969;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.admin-nav-item:hover {
+    background: #f2f3f5;
+    color: #3370ff;
+}
+
+/* ============ 管理员面板 ============ */
+.admin-panel {
+    padding: 24px;
+    overflow-y: auto;
+}
+.admin-panel h2 {
+    margin: 0 0 20px 0;
+    font-size: 20px;
+    color: #1d2129;
+}
+.admin-table-wrap {
+    background: #fff;
+    border: 1px solid #e5e6eb;
+    border-radius: 8px;
+    overflow: auto;
+}
+.admin-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+.admin-table th, .admin-table td {
+    padding: 10px 14px;
+    text-align: left;
+    border-bottom: 1px solid #f2f3f5;
+    white-space: nowrap;
+}
+.admin-table th {
+    background: #f7f8fa;
+    font-weight: 600;
+    color: #4e5969;
+}
+.admin-table tr:hover td {
+    background: #f7f8fa;
+}
+.admin-table td button {
+    margin-right: 6px;
+}
+
+/* 角色和状态徽章 */
+.role-badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 10px;
+    font-size: 12px;
+}
+.role-badge.role-admin { background: #fff7e8; color: #ff7d00; }
+.role-badge.role-user { background: #e8f3ff; color: #3370ff; }
+
+.status-badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 10px;
+    font-size: 12px;
+}
+.status-pending { background: #fff7e8; color: #ff7d00; }
+.status-active { background: #e8ffea; color: #00b42a; }
+.status-disabled { background: #f2f3f5; color: #86909c; }
+
+/* 审计日志筛选 */
+.audit-filter {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+    align-items: center;
+}
+.audit-filter input {
+    padding: 6px 10px;
+    border: 1px solid #e5e6eb;
+    border-radius: 6px;
+    font-size: 13px;
+}
+
+/* 在线用户统计 */
+.online-summary {
+    font-size: 15px;
+    margin-bottom: 16px;
+    color: #4e5969;
+}
+.online-summary b {
+    color: #00b42a;
+    font-size: 20px;
+}
+
+.btn-xs {
+    padding: 3px 10px;
+    font-size: 12px;
+    border-radius: 4px;
+}
+
+/* ============ 数据库优化面板 ============ */
+.optimize-panel {
+    background: #fff;
+    border: 1px solid #e5e6eb;
+    border-radius: 8px;
+    margin-bottom: 12px;
+    overflow: visible;
+    flex-shrink: 0;
+    max-height: 60vh;
+    display: flex;
+    flex-direction: column;
+}
+.optimize-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 16px;
+    background: #f7f8fa;
+    border-bottom: 1px solid #e5e6eb;
+}
+.optimize-header h3 {
+    margin: 0;
+    font-size: 14px;
+    color: #1d2129;
+}
+.optimize-tabs {
+    display: flex;
+    gap: 4px;
+    padding: 8px 12px;
+    border-bottom: 1px solid #f2f3f5;
+    flex-wrap: wrap;
+}
+.optimize-tab {
+    padding: 5px 12px;
+    font-size: 12px;
+    border: 1px solid #e5e6eb;
+    border-radius: 14px;
+    background: #fff;
+    cursor: pointer;
+    color: #4e5969;
+    transition: all 0.2s;
+}
+.optimize-tab:hover {
+    border-color: #3370ff;
+    color: #3370ff;
+}
+.optimize-tab.active {
+    background: #3370ff;
+    color: #fff;
+    border-color: #3370ff;
+}
+.optimize-content {
+    padding: 16px;
+    flex: 1;
+    overflow-y: auto;
+    background: #fff;
+    min-height: 100px;
+}
+.optimize-content .form-row {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+.optimize-content .form-group {
+    flex: 1;
+}
+.optimize-content label {
+    display: block;
+    font-size: 12px;
+    color: #4e5969;
+    margin-bottom: 4px;
+}
+.optimize-content input, .optimize-content select, .optimize-content textarea {
+    width: 100%;
+    padding: 6px 10px;
+    border: 1px solid #e5e6eb;
+    border-radius: 6px;
+    font-size: 13px;
+    box-sizing: border-box;
+}
+.optimize-content textarea {
+    font-family: Consolas, monospace;
+    font-size: 12px;
+    min-height: 100px;
+}
+.opt-result {
+    margin-top: 12px;
+    padding: 12px;
+    background: #f7f8fa;
+    border-radius: 6px;
+    font-size: 12px;
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-height: 300px;
+    overflow-y: auto;
+}
+.pragma-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 10px;
+}
+.pragma-item {
+    border: 1px solid #e5e6eb;
+    border-radius: 6px;
+    padding: 8px 12px;
+    background: #fafbfc;
+}
+.pragma-name {
+    font-size: 12px;
+    color: #86909c;
+    margin-bottom: 4px;
+}
+.pragma-val {
+    font-family: Consolas, monospace;
+    font-size: 13px;
+    color: #1d2129;
+}
