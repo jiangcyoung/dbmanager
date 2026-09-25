@@ -46,11 +46,31 @@ func Error(w http.ResponseWriter, code int, message string) {
 	Response(w, code, message, nil)
 }
 
-// GetConnections 获取所有连接
+// GetConnections 获取所有连接（含在线状态）
 func GetConnections(w http.ResponseWriter, r *http.Request) {
 	cfg := config.GetConfig()
 	conns := cfg.GetConnections()
-	Success(w, conns)
+	mgr := db.GetManager()
+	result := make([]map[string]interface{}, 0, len(conns))
+	for _, c := range conns {
+		online := mgr.IsConnected(c.ID)
+		// 密码不返回前端
+		c.Password = ""
+		result = append(result, map[string]interface{}{
+			"id":         c.ID,
+			"name":       c.Name,
+			"type":       c.Type,
+			"host":       c.Host,
+			"port":       c.Port,
+			"username":   c.Username,
+			"database":   c.Database,
+			"file_path":  c.FilePath,
+			"db_index":   c.DBIndex,
+			"params":     c.Params,
+			"online":     online,
+		})
+	}
+	Success(w, result)
 }
 
 // GetConnection 获取单个连接
@@ -172,6 +192,65 @@ func TestConnection(w http.ResponseWriter, r *http.Request) {
 	result := db.GetManager().TestConnection(conn)
 	auditRecord(r, "test_connection", "connection", "测试连接: "+conn.Name)
 	Success(w, result)
+}
+
+// ConnectConnection 显式连接（建立并放入连接池）
+func ConnectConnection(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/api/connections/")
+	id = strings.TrimSuffix(id, "/connect")
+	if id == "" {
+		Error(w, 400, "连接ID不能为空")
+		return
+	}
+	cfg := config.GetConfig()
+	conn := cfg.GetConnectionByID(id)
+	if conn == nil {
+		Error(w, 404, "连接不存在")
+		return
+	}
+	mgr := db.GetManager()
+	// 若已在线，无需重复连接
+	if mgr.IsConnected(id) {
+		Success(w, map[string]interface{}{"online": true, "message": "连接已在线"})
+		return
+	}
+	if err := mgr.Connect(*conn); err != nil {
+		Error(w, 500, "连接失败: "+err.Error())
+		return
+	}
+	auditRecord(r, "connect", "connection", "连接: "+conn.Name)
+	Success(w, map[string]interface{}{"online": true, "message": "连接成功"})
+}
+
+// DisconnectConnection 断开连接（从连接池移除）
+func DisconnectConnection(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/api/connections/")
+	id = strings.TrimSuffix(id, "/disconnect")
+	if id == "" {
+		Error(w, 400, "连接ID不能为空")
+		return
+	}
+	cfg := config.GetConfig()
+	conn := cfg.GetConnectionByID(id)
+	if conn == nil {
+		Error(w, 404, "连接不存在")
+		return
+	}
+	db.GetManager().CloseConnection(id)
+	auditRecord(r, "disconnect", "connection", "断开连接: "+conn.Name)
+	Success(w, map[string]interface{}{"online": false, "message": "已断开"})
+}
+
+// ConnectionStatus 查询连接在线状态
+func ConnectionStatus(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/api/connections/")
+	id = strings.TrimSuffix(id, "/status")
+	if id == "" {
+		Error(w, 400, "连接ID不能为空")
+		return
+	}
+	online := db.GetManager().IsConnected(id)
+	Success(w, map[string]interface{}{"id": id, "online": online})
 }
 
 // ListTables 列出所有表

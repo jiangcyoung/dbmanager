@@ -82,6 +82,40 @@ func Logout(token string) {
 	GetSessionStore().Delete(token)
 }
 
+// CreateUser 管理员创建用户（可指定角色、描述，状态默认激活）
+func CreateUser(username, password, description string, role model.Role) (*model.User, error) {
+	if username == "" {
+		return nil, ErrInvalidUsername
+	}
+	if len(password) < 6 {
+		return nil, ErrInvalidPassword
+	}
+	if role != model.RoleAdmin && role != model.RoleUser {
+		role = model.RoleUser
+	}
+	store := GetStore()
+	if store.GetByUsername(username) != nil {
+		return nil, ErrUserExists
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, err
+	}
+	u := model.User{
+		ID:           uuid.New().String(),
+		Username:     username,
+		PasswordHash: string(hash),
+		Role:         role,
+		Status:       model.StatusActive,
+		Description:  description,
+		CreatedAt:    time.Now(),
+	}
+	if err := store.Create(u); err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
 // GetUserByToken 根据 token 获取用户
 func GetUserByToken(token string) *model.User {
 	sess := GetSessionStore().Get(token)

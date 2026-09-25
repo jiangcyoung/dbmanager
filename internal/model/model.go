@@ -26,6 +26,7 @@ type User struct {
 	PasswordHash string     `json:"password_hash"`
 	Role         Role       `json:"role"`
 	Status       UserStatus `json:"status"`
+	Description  string     `json:"description"`
 	CreatedAt    time.Time  `json:"created_at"`
 	LastLoginAt  *time.Time `json:"last_login_at,omitempty"`
 }
@@ -36,6 +37,7 @@ type PublicUser struct {
 	Username    string     `json:"username"`
 	Role        Role       `json:"role"`
 	Status      UserStatus `json:"status"`
+	Description string     `json:"description"`
 	CreatedAt   time.Time  `json:"created_at"`
 	LastLoginAt *time.Time `json:"last_login_at,omitempty"`
 }
@@ -47,6 +49,7 @@ func (u *User) ToPublic() PublicUser {
 		Username:    u.Username,
 		Role:        u.Role,
 		Status:      u.Status,
+		Description: u.Description,
 		CreatedAt:   u.CreatedAt,
 		LastLoginAt: u.LastLoginAt,
 	}

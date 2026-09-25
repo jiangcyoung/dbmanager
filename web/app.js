@@ -207,6 +207,7 @@ async function loadUsers() {
                     <td>${u.username}</td>
                     <td><span class="role-badge role-${u.role}">${u.role === 'admin' ? '管理员' : '普通用户'}</span></td>
                     <td>${statusBadge(u.status)}</td>
+                    <td title="${u.description || ''}">${u.description ? escapeHtml(u.description) : '-'}</td>
                     <td>${fmtTime(u.created_at)}</td>
                     <td>${u.last_login_at ? fmtTime(u.last_login_at) : '-'}</td>
                     <td>
@@ -230,6 +231,13 @@ function statusBadge(status) {
         disabled: '<span class="status-badge status-disabled">已禁用</span>'
     };
     return map[status] || status;
+}
+
+function escapeHtml(str) {
+    if (!str) return '';
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
 }
 
 function fmtTime(t) {
@@ -297,6 +305,55 @@ async function deleteUser(id) {
         }
     } catch (e) {
         showToast('删除失败', 'error');
+    }
+}
+
+// 打开添加用户弹窗
+function openAddUserModal() {
+    document.getElementById('newUsername').value = '';
+    document.getElementById('newPassword').value = '';
+    document.getElementById('newUserRole').value = 'user';
+    document.getElementById('newUserDescription').value = '';
+    document.getElementById('addUserModal').classList.add('show');
+}
+
+// 关闭添加用户弹窗
+function closeAddUserModal() {
+    document.getElementById('addUserModal').classList.remove('show');
+}
+
+// 提交创建用户
+async function submitAddUser() {
+    const username = document.getElementById('newUsername').value.trim();
+    const password = document.getElementById('newPassword').value;
+    const role = document.getElementById('newUserRole').value;
+    const description = document.getElementById('newUserDescription').value.trim();
+
+    if (!username) {
+        showToast('请输入用户名', 'error');
+        return;
+    }
+    if (!password || password.length < 6) {
+        showToast('密码长度至少6位', 'error');
+        return;
+    }
+
+    try {
+        const res = await authFetch(`${API_BASE}/admin/users`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password, role, description })
+        });
+        const data = await res.json();
+        if (data.code === 0) {
+            showToast('用户创建成功', 'success');
+            closeAddUserModal();
+            loadUsers();
+        } else {
+            showToast(data.message || '创建失败', 'error');
+        }
+    } catch (e) {
+        showToast('创建失败，请重试', 'error');
     }
 }
 
@@ -403,10 +460,17 @@ function renderConnectionList(connections) {
              onclick="selectConnection('${conn.id}')"
              ondblclick="editConnection('${conn.id}')">
             <div class="conn-item-title">
+                <span class="conn-status-dot ${conn.online ? 'online' : 'offline'}" title="${conn.online ? '在线' : '离线'}"></span>
                 <span class="type-badge type-${conn.type}">${getTypeLabel(conn.type)}</span>
                 ${conn.name}
             </div>
             <div class="conn-item-type">${getConnSubtitle(conn)}</div>
+            <div class="conn-item-actions" onclick="event.stopPropagation()">
+                ${conn.online
+                    ? `<button class="conn-action-btn btn-disconnect" onclick="disconnectConn('${conn.id}')" title="断开连接">断开</button>`
+                    : `<button class="conn-action-btn btn-connect" onclick="connectConn('${conn.id}')" title="建立连接">连接</button>`
+                }
+            </div>
         </div>
     `).join('');
     
@@ -448,6 +512,61 @@ function quickSwitchConn() {
     }
 }
 
+// 连接数据库
+async function connectConn(id) {
+    try {
+        const res = await authFetch(`${API_BASE}/connections/${id}/connect`, { method: 'POST' });
+        const data = await res.json();
+        if (data.code === 0) {
+            showToast(data.data.message || '连接成功', 'success');
+        } else {
+            showToast(data.message, 'error');
+        }
+    } catch (e) {
+        showToast('连接失败: ' + e.message, 'error');
+    }
+    loadConnections();
+    if (id === currentConnId) updateConnStatusDot(id);
+}
+
+// 更新工具栏连接状态指示灯
+async function updateConnStatusDot(id) {
+    try {
+        const res = await authFetch(`${API_BASE}/connections/${id}/status`);
+        const data = await res.json();
+        if (data.code === 0) {
+            const dot = document.getElementById('currentConnStatus');
+            dot.style.display = 'inline-block';
+            dot.className = 'conn-status-dot ' + (data.data.online ? 'online' : 'offline');
+            dot.title = data.data.online ? '在线' : '离线';
+        }
+    } catch (e) {}
+}
+
+// 断开数据库连接
+async function disconnectConn(id) {
+    if (!confirm('确定断开该数据库连接？')) return;
+    try {
+        const res = await authFetch(`${API_BASE}/connections/${id}/disconnect`, { method: 'POST' });
+        const data = await res.json();
+        if (data.code === 0) {
+            showToast(data.data.message || '已断开', 'success');
+            // 如果断开的是当前连接，清空工作区
+            if (id === currentConnId) {
+                currentConnId = null;
+                document.getElementById('toolbar').style.display = 'none';
+                document.getElementById('workspace').style.display = 'none';
+                document.getElementById('welcome').style.display = 'flex';
+            }
+        } else {
+            showToast(data.message, 'error');
+        }
+    } catch (e) {
+        showToast('断开失败: ' + e.message, 'error');
+    }
+    loadConnections();
+}
+
 // 选择连接
 async function selectConnection(id) {
     currentConnId = id;
@@ -470,6 +589,7 @@ async function selectConnection(id) {
             document.getElementById('toolbar').style.display = 'flex';
             document.getElementById('welcome').style.display = 'none';
             document.getElementById('queryPanel').style.display = 'flex';
+            updateConnStatusDot(id);
             
             const collectionInput = document.getElementById('collectionInput');
             if (conn.type === 'mongodb') {

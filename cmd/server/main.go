@@ -84,6 +84,32 @@ func main() {
 			return
 		}
 
+		// 连接操作：/connect, /disconnect, /status
+		if strings.HasSuffix(path, "/connect") {
+			if r.Method == http.MethodPost {
+				authWrap(handler.ConnectConnection)(w, r)
+				return
+			}
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if strings.HasSuffix(path, "/disconnect") {
+			if r.Method == http.MethodPost {
+				authWrap(handler.DisconnectConnection)(w, r)
+				return
+			}
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if strings.HasSuffix(path, "/status") {
+			if r.Method == http.MethodGet {
+				authWrap(handler.ConnectionStatus)(w, r)
+				return
+			}
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
 		switch r.Method {
 		case http.MethodGet:
 			authWrap(handler.GetConnection)(w, r)
@@ -112,11 +138,14 @@ func main() {
 	}
 
 	http.HandleFunc("/api/admin/users", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet {
+		switch r.Method {
+		case http.MethodGet:
 			adminWrap(handler.ListUsers)(w, r)
-			return
+		case http.MethodPost:
+			adminWrap(handler.CreateUser)(w, r)
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	})
 
 	http.HandleFunc("/api/admin/users/", func(w http.ResponseWriter, r *http.Request) {

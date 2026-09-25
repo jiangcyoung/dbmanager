@@ -136,6 +136,24 @@ func (m *Manager) CloseConnection(id string) {
 	}
 }
 
+// IsConnected 检查连接是否在线（存在于连接池且可 Ping）
+func (m *Manager) IsConnected(id string) bool {
+	m.mu.RLock()
+	pc, ok := m.pool[id]
+	m.mu.RUnlock()
+	if !ok {
+		return false
+	}
+	_, err := pc.Conn.Ping()
+	return err == nil
+}
+
+// Connect 显式建立连接（放入连接池）
+func (m *Manager) Connect(conn model.DBConnection) error {
+	_, err := m.GetConnection(conn)
+	return err
+}
+
 // CloseAll 关闭所有连接
 func (m *Manager) CloseAll() {
 	m.mu.Lock()

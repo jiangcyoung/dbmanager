@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -10,6 +11,30 @@ import (
 	"dbmanager/internal/middleware"
 	"dbmanager/internal/model"
 )
+
+// CreateUser 管理员创建用户
+func CreateUser(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Username    string `json:"username"`
+		Password    string `json:"password"`
+		Role        string `json:"role"`
+		Description string `json:"description"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		Error(w, 400, "参数错误: "+err.Error())
+		return
+	}
+	role := model.Role(req.Role)
+	user, err := auth.CreateUser(req.Username, req.Password, req.Description, role)
+	if err != nil {
+		Error(w, 400, err.Error())
+		return
+	}
+	admin := middleware.UserFromContext(r.Context())
+	audit.GetLogger().Record(admin.Username, string(admin.Role), "create_user", "user",
+		"创建用户: "+user.Username+" ("+string(user.Role)+")", middleware.ClientIP(r), middleware.UserAgent(r))
+	Success(w, user.ToPublic())
+}
 
 // ListUsers 获取所有用户（管理员）
 func ListUsers(w http.ResponseWriter, r *http.Request) {
