@@ -682,10 +682,6 @@ body {
     align-items: center;
     gap: 8px;
     margin-bottom: 10px;
-    padding: 6px 8px;
-    background: #f7f8fa;
-    border: 1px solid #e5e6eb;
-    border-radius: 6px;
 }
 
 .db-selector label {
@@ -696,12 +692,20 @@ body {
 
 .db-selector select {
     flex: 1;
-    padding: 4px 6px;
+    height: 28px;
+    padding: 0 8px;
     border: 1px solid #e5e6eb;
-    border-radius: 4px;
-    font-size: 12px;
+    border-radius: 6px;
+    font-size: 13px;
     outline: none;
     background: #fff;
+    color: #4e5969;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.db-selector select:focus {
+    border-color: #3370ff;
+    box-shadow: 0 0 0 2px rgba(51, 112, 255, 0.15);
 }
 
 /* 表项布局与操作按钮 */

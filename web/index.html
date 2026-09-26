@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DB Manager - 数据库连接管理</title>
-    <link rel="stylesheet" href="style.css?v=20260929">
+    <link rel="stylesheet" href="style.css?v=20261001">
     <script>
         (function() {
             const THEME_KEY = 'dbmanager-theme';
@@ -125,7 +125,7 @@
                 <div class="query-panel" id="queryPanel" style="display: none;">
                     <div class="tables-sidebar">
                         <div class="tables-sidebar-header">
-                            <h3>表列表</h3>
+                            <h3 id="sidebarTitle">表列表</h3>
                             <div class="table-actions">
                                 <button class="btn btn-sm" id="btnNewDb" onclick="quickCreateDatabase()" title="新建数据库" style="display: none;">＋库</button>
                                 <button class="btn btn-sm" id="btnNewTable" onclick="quickCreateTable()" title="新建表/集合" style="display: none;">＋表</button>
@@ -451,6 +451,6 @@
             }
         })();
     </script>
-    <script src="app.js?v=20260929"></script>
+    <script src="app.js?v=20261001"></script>
 </body>
 </html>

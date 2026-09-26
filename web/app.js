@@ -722,6 +722,23 @@ async function disconnectConn(id) {
     loadConnections();
 }
 
+// 按数据库类型调整侧栏标题与按钮文案
+function setSidebarForType(type) {
+    const title = document.getElementById('sidebarTitle');
+    const btn = document.getElementById('btnNewTable');
+    if (!title) return;
+    if (type === 'mongodb') {
+        title.textContent = '集合列表';
+        if (btn) btn.textContent = '＋集合';
+    } else if (type === 'redis') {
+        title.textContent = 'Keys';
+        if (btn) btn.textContent = '＋Key';
+    } else {
+        title.textContent = '表列表';
+        if (btn) btn.textContent = '＋表';
+    }
+}
+
 // 选择连接
 async function selectConnection(id) {
     currentConnId = id;
@@ -741,6 +758,7 @@ async function selectConnection(id) {
             const conn = data.data;
             document.getElementById('currentConnName').textContent = conn.name;
             document.getElementById('currentConnType').textContent = getTypeLabel(conn.type);
+            setSidebarForType(conn.type);
             document.getElementById('workspace').style.display = 'flex';
             document.getElementById('toolbar').style.display = 'flex';
             document.getElementById('welcome').style.display = 'none';
