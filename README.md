@@ -6,7 +6,7 @@
 
 ### 核心功能
 - **多数据库支持**：MySQL、PostgreSQL、SQLite、MongoDB、Redis 五种数据库统一纳管
-- **连接管理**：连接的增删改查，配置持久化存储，一键测试连接（含延迟）
+- **连接管理**：连接的增删改查，配置持久化存储，一键测试连接（含延迟）；连接严格按创建者隔离，每个用户仅可见/可操作自己创建的连接
 - **连接池**：自动管理连接复用与保活检测
 - **库表管理**：
   - MySQL/PostgreSQL 支持库列表展示、快速切换、建库/删库
@@ -21,11 +21,12 @@
 ### 权限与安全
 - **用户认证**：基于 Token 的会话管理，登录后自动续期，超时自动登出
 - **角色体系**：
-  - **系统管理员**：启动时从配置文件自动创建，拥有全部权限
-  - **普通用户**：注册后需管理员审批才能登录，仅可操作数据库
+  - **系统管理员**：启动时从配置文件自动创建，负责用户管理与系统配置
+  - **普通用户**：注册后需管理员审批才能登录，使用数据库功能
+- **连接隔离**：连接资源严格按创建者隔离，普通用户与管理员均仅可见/可操作自己创建的连接
 - **注册审批**：用户注册后状态为待审批，管理员可通过/禁用/删除
 - **角色升降级**：管理员可将普通用户设为管理员（保护机制：不能修改自己角色、不能取消最后一个管理员）
-- **权限控制**：所有管理接口需管理员权限，所有数据库接口需登录
+- **权限控制**：管理功能仅管理员可用，数据库功能需登录，连接数据按用户严格隔离
 
 ### 审计与监控
 - **审计日志**：所有平台操作（登录、注册、审批、库表操作、SQL 执行、优化操作等）均记录到内置 SQLite 数据库，含时间、用户、角色、操作类型、资源、详情、IP、User-Agent，支持按用户/操作类型筛选
@@ -174,6 +175,7 @@ graph TB
 | SQL 扫描 | `scan.go` 共享 `queryRows`，MySQL/PG/SQLite 三驱动复用 |
 | Redis 批量 | Pipeline 批量 TYPE+TTL，消除 N+1 查询 |
 | 审计日志 | 内存缓冲 (≥100条或5s) + 事务批量 INSERT + SQL 索引查询 |
+| 连接隔离 | 连接归属创建用户（created_by），列表过滤 + 接口级 403 校验，管理员无特权 |
 | 会话管理 | 内存 Token + 自动续期 + 超时清理 |
 | 优雅关闭 | `signal.NotifyContext` → `srv.Shutdown` → `audit.Flush` → `db.CloseAll` → `store.Close` |
 | 安全 | `MaxBytesReader` 限流 · `url.QueryEscape` 防注入 · CORS 白名单 |
@@ -289,92 +291,6 @@ docker-compose -f docker-compose-full.yml up -d
 | SQLite | ✅ | — | ✅ | ✅ | ✅ | ✅ |
 | MongoDB | ✅ | — | ✅ | ✅ | ✅ | ✅ |
 | Redis | ✅ | — | — | ✅ (Key) | — | ✅ |
-
-## 🔌 API 接口
-
-### 认证与用户
-
-| 方法 | 路径 | 说明 | 权限 |
-|------|------|------|------|
-| POST | `/api/auth/login` | 登录 | 公开 |
-| POST | `/api/auth/register` | 注册（待审批） | 公开 |
-| POST | `/api/auth/logout` | 登出 | 登录 |
-| GET | `/api/auth/me` | 当前用户信息 | 登录 |
-
-### 管理（需管理员）
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/admin/users` | 用户列表 |
-| PUT | `/api/admin/users/{id}/approve` | 审批用户 |
-| PUT | `/api/admin/users/{id}/status` | 启用/禁用用户 |
-| PUT | `/api/admin/users/{id}/role` | 修改角色 |
-| DELETE | `/api/admin/users/{id}` | 删除用户 |
-| GET | `/api/admin/audit-logs` | 审计日志 |
-| GET | `/api/admin/online-users` | 在线用户 |
-
-### 连接与查询
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/connections` | 获取所有连接 |
-| POST | `/api/connections` | 新增连接 |
-| PUT | `/api/connections/{id}` | 更新连接 |
-| DELETE | `/api/connections/{id}` | 删除连接 |
-| POST | `/api/connections/test` | 测试连接 |
-| GET | `/api/connections/{id}/tables` | 获取表列表 |
-| POST | `/api/connections/query` | 执行查询 |
-
-### 快捷操作
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/quick/{id}/databases` | 库列表 |
-| GET | `/api/quick/{id}/tables?db=` | 指定库的表列表 |
-| GET | `/api/quick/{id}/columns?table=` | 表列信息（含主键） |
-| POST | `/api/quick/{id}/table` | 新建表 |
-| PUT | `/api/quick/{id}/table/rename` | 表改名 |
-| DELETE | `/api/quick/{id}/table` | 删除表 |
-| GET | `/api/quick/{id}/rows` | 行数据浏览 |
-| POST | `/api/quick/{id}/row` | 插入行 |
-| PUT | `/api/quick/{id}/row` | 更新行 |
-| DELETE | `/api/quick/{id}/row` | 删除行 |
-| GET | `/api/quick/{id}/indexes?table=` | 索引列表 |
-| POST | `/api/quick/{id}/index` | 创建索引 |
-| DELETE | `/api/quick/{id}/index` | 删除索引 |
-
-### 数据库优化
-
-| 方法 | 路径 | 说明 | 适用 |
-|------|------|------|------|
-| GET | `/api/quick/{id}/redis/keys` | Key 列表（SCAN） | Redis |
-| GET | `/api/quick/{id}/redis/key` | Key 详情（类型感知） | Redis |
-| POST | `/api/quick/{id}/redis/key` | 设置 String | Redis |
-| PUT | `/api/quick/{id}/redis/ttl` | 设置过期时间 | Redis |
-| DELETE | `/api/quick/{id}/redis/key` | 删除 Key | Redis |
-| GET | `/api/quick/{id}/redis/info` | 服务器信息 | Redis |
-| GET | `/api/quick/{id}/redis/dbsize` | Key 数量 | Redis |
-| POST | `/api/quick/{id}/redis/flushdb` | 清空当前 DB | Redis |
-| POST | `/api/quick/{id}/mongo/aggregate` | 聚合管道 | MongoDB |
-| GET | `/api/quick/{id}/mongo/count` | 文档统计 | MongoDB |
-| GET | `/api/quick/{id}/mongo/distinct` | 去重查询 | MongoDB |
-| GET | `/api/quick/{id}/mongo/stats/collection` | 集合统计 | MongoDB |
-| GET | `/api/quick/{id}/mongo/stats/database` | 数据库统计 | MongoDB |
-| GET | `/api/quick/{id}/pg/schemas` | Schema 列表 | PostgreSQL |
-| POST | `/api/quick/{id}/pg/schema` | 创建 Schema | PostgreSQL |
-| DELETE | `/api/quick/{id}/pg/schema` | 删除 Schema | PostgreSQL |
-| POST | `/api/quick/{id}/pg/explain` | EXPLAIN ANALYZE | PostgreSQL |
-| POST | `/api/quick/{id}/pg/vacuum` | VACUUM | PostgreSQL |
-| POST | `/api/quick/{id}/pg/analyze` | ANALYZE | PostgreSQL |
-| POST | `/api/quick/{id}/pg/reindex` | REINDEX | PostgreSQL |
-| GET | `/api/quick/{id}/pg/sizes` | 表大小统计 | PostgreSQL |
-| GET | `/api/quick/{id}/pg/sequences` | 序列列表 | PostgreSQL |
-| GET | `/api/quick/{id}/sqlite/pragmas` | PRAGMA 列表 | SQLite |
-| PUT | `/api/quick/{id}/sqlite/pragma` | 设置 PRAGMA | SQLite |
-| POST | `/api/quick/{id}/sqlite/vacuum` | VACUUM | SQLite |
-| POST | `/api/quick/{id}/sqlite/reindex` | REINDEX | SQLite |
-| POST | `/api/quick/{id}/sqlite/explain` | EXPLAIN QUERY PLAN | SQLite |
-| GET | `/api/quick/{id}/sqlite/version` | SQLite 版本 | SQLite |
 
 ## 🛠️ 技术栈
 
