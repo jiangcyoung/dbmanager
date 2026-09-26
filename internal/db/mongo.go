@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
 
 	"dbmanager/internal/model"
 
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -171,7 +173,7 @@ func (d *MongoDriver) Update(collection string, where, data map[string]interface
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	filter := toBSON(where)
+	filter := normalizeWhere(where)
 	update := bson.M{"$set": toBSON(data)}
 	_, err := d.db.Collection(collection).UpdateMany(ctx, filter, update)
 	return err
@@ -184,9 +186,35 @@ func (d *MongoDriver) Delete(collection string, where map[string]interface{}) er
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	filter := toBSON(where)
+	filter := normalizeWhere(where)
 	_, err := d.db.Collection(collection).DeleteMany(ctx, filter)
 	return err
+}
+
+// normalizeWhere 将 where 条件中字符串形式的 _id 还原为 ObjectID，确保更新/删除能命中
+func normalizeWhere(where map[string]interface{}) bson.M {
+	filter := toBSON(where)
+	if idVal, ok := where["_id"]; ok {
+		if oid, ok2 := toObjectID(idVal); ok2 {
+			filter["_id"] = oid
+		}
+	}
+	return filter
+}
+
+// toObjectID 尝试把 _id 的字符串形式（如 ObjectID("64f...") 或 24 位 hex）还原为 ObjectID
+func toObjectID(v interface{}) (primitive.ObjectID, bool) {
+	s, ok := v.(string)
+	if !ok {
+		return primitive.ObjectID{}, false
+	}
+	if strings.HasPrefix(s, `ObjectID("`) && strings.HasSuffix(s, `")`) {
+		s = strings.TrimSuffix(strings.TrimPrefix(s, `ObjectID("`), `")`)
+	}
+	if oid, err := primitive.ObjectIDFromHex(s); err == nil {
+		return oid, true
+	}
+	return primitive.ObjectID{}, false
 }
 
 // ListIndexes 列出集合索引
@@ -432,4 +460,76 @@ func (d *MongoDriver) FindOneAndUpdate(collection string, filter, update map[str
 		result["_id"] = fmt.Sprintf("%v", id)
 	}
 	return result, nil
+}
+
+// ListDatabases 列出所有数据库
+func (d *MongoDriver) ListDatabases() ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	dbNames, err := d.client.ListDatabaseNames(ctx, bson.M{})
+	if err != nil {
+		return nil, err
+	}
+	return dbNames, nil
+}
+
+// CreateDatabase 创建数据库（通过创建空集合）
+func (d *MongoDriver) CreateDatabase(name string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	db := d.client.Database(name)
+	// MongoDB 数据库在插入数据时自动创建，这里创建一个临时集合确保数据库被创建
+	coll := db.Collection("_init_")
+	_, err := coll.InsertOne(ctx, bson.M{"created_at": time.Now()})
+	if err != nil {
+		return err
+	}
+	// 删除临时集合
+	_ = coll.Drop(ctx)
+	return nil
+}
+
+// DropDatabase 删除数据库
+func (d *MongoDriver) DropDatabase(name string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	db := d.client.Database(name)
+	return db.Drop(ctx)
+}
+
+// RenameCollection 重命名集合
+func (d *MongoDriver) RenameCollection(oldName, newName string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := bson.D{
+		{Key: "renameCollection", Value: d.db.Name() + "." + oldName},
+		{Key: "to", Value: d.db.Name() + "." + newName},
+	}
+	return d.client.Database("admin").RunCommand(ctx, cmd).Err()
+}
+
+// GetSampleFields 获取样本字段（用于获取集合的字段结构）
+func (d *MongoDriver) GetSampleFields(collection string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cursor, err := d.db.Collection(collection).Find(ctx, bson.M{}, options.Find().SetLimit(10))
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+	fieldMap := make(map[string]bool)
+	for cursor.Next(ctx) {
+		var doc bson.M
+		if err := cursor.Decode(&doc); err != nil {
+			continue
+		}
+		for k := range doc {
+			fieldMap[k] = true
+		}
+	}
+	fields := make([]string, 0, len(fieldMap))
+	for k := range fieldMap {
+		fields = append(fields, k)
+	}
+	return fields, nil
 }

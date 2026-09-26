@@ -76,7 +76,7 @@ func scanConnection(rows *sql.Rows) (model.DBConnection, error) {
 	var paramsJSON sql.NullString
 	err := rows.Scan(&conn.ID, &conn.Name, &conn.Type, &conn.Host, &conn.Port,
 		&conn.Username, &conn.Password, &conn.Database, &conn.FilePath,
-		&conn.DBIndex, &paramsJSON)
+		&conn.DBIndex, &paramsJSON, &conn.CreatedBy)
 	if err != nil {
 		return conn, err
 	}
@@ -86,7 +86,7 @@ func scanConnection(rows *sql.Rows) (model.DBConnection, error) {
 	return conn, nil
 }
 
-const connCols = `id, name, type, host, port, username, password, database_name, file_path, db_index, params_json`
+const connCols = `id, name, type, host, port, username, password, database_name, file_path, db_index, params_json, created_by`
 
 func (c *Config) GetConnections() []model.DBConnection {
 	rows, err := c.db().Query("SELECT " + connCols + " FROM connections ORDER BY name")
@@ -128,11 +128,11 @@ func (c *Config) GetConnectionByID(id string) *model.DBConnection {
 func (c *Config) AddConnection(conn model.DBConnection) error {
 	paramsJSON, _ := json.Marshal(conn.Params)
 	_, err := c.db().Exec(
-		`INSERT INTO connections (id, name, type, host, port, username, password, database_name, file_path, db_index, params_json, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO connections (id, name, type, host, port, username, password, database_name, file_path, db_index, params_json, created_by, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		conn.ID, conn.Name, conn.Type, conn.Host, conn.Port,
 		conn.Username, conn.Password, conn.Database, conn.FilePath,
-		conn.DBIndex, string(paramsJSON), time.Now(),
+		conn.DBIndex, string(paramsJSON), conn.CreatedBy, time.Now(),
 	)
 	return err
 }
@@ -141,9 +141,9 @@ func (c *Config) UpdateConnection(id string, conn model.DBConnection) error {
 	paramsJSON, _ := json.Marshal(conn.Params)
 	_, err := c.db().Exec(
 		`UPDATE connections SET name=?, type=?, host=?, port=?, username=?, password=?,
-		 database_name=?, file_path=?, db_index=?, params_json=? WHERE id=?`,
+		 database_name=?, file_path=?, db_index=?, params_json=?, created_by=? WHERE id=?`,
 		conn.Name, conn.Type, conn.Host, conn.Port, conn.Username, conn.Password,
-		conn.Database, conn.FilePath, conn.DBIndex, string(paramsJSON), id,
+		conn.Database, conn.FilePath, conn.DBIndex, string(paramsJSON), conn.CreatedBy, id,
 	)
 	return err
 }

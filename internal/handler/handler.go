@@ -25,6 +25,23 @@ func auditRecord(r *http.Request, action, resource, detail string) {
 	audit.GetLogger().Record(username, role, action, resource, detail, middleware.ClientIP(r), middleware.UserAgent(r))
 }
 
+// canAccessConnection 判断当前用户是否有权访问连接（管理员可见全部，普通用户仅本人创建）
+func canAccessConnection(r *http.Request, conn *model.DBConnection) bool {
+	user := middleware.UserFromContext(r.Context())
+	if user == nil {
+		return false
+	}
+	if user.Role == model.RoleAdmin {
+		return true
+	}
+	return conn.CreatedBy != "" && conn.CreatedBy == user.ID
+}
+
+// accessDenied 无权限响应
+func accessDenied(w http.ResponseWriter) {
+	Error(w, 403, "无权访问该连接")
+}
+
 // httpStatus 将业务 code 映射为 HTTP 状态码
 func httpStatus(code int) int {
 	switch code {
@@ -71,8 +88,13 @@ func GetConnections(w http.ResponseWriter, r *http.Request) {
 	cfg := config.GetConfig()
 	conns := cfg.GetConnections()
 	mgr := db.GetManager()
+	user := middleware.UserFromContext(r.Context())
 	result := make([]map[string]interface{}, 0, len(conns))
 	for _, c := range conns {
+		// 用户隔离：普通用户仅可见自己创建的连接
+		if user == nil || (user.Role != model.RoleAdmin && (c.CreatedBy == "" || c.CreatedBy != user.ID)) {
+			continue
+		}
 		online := mgr.IsConnected(c.ID)
 		// 密码不返回前端
 		c.Password = ""
@@ -87,6 +109,7 @@ func GetConnections(w http.ResponseWriter, r *http.Request) {
 			"file_path":  c.FilePath,
 			"db_index":   c.DBIndex,
 			"params":     c.Params,
+			"created_by": c.CreatedBy,
 			"online":     online,
 		})
 	}
@@ -104,6 +127,10 @@ func GetConnection(w http.ResponseWriter, r *http.Request) {
 	conn := cfg.GetConnectionByID(id)
 	if conn == nil {
 		Error(w, 404, "连接不存在")
+		return
+	}
+	if !canAccessConnection(r, conn) {
+		accessDenied(w)
 		return
 	}
 	conn.Password = ""
@@ -126,6 +153,9 @@ func AddConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	conn.ID = uuid.New().String()
+	if user := middleware.UserFromContext(r.Context()); user != nil {
+		conn.CreatedBy = user.ID
+	}
 
 	cfg := config.GetConfig()
 	if err := cfg.AddConnection(conn); err != nil {
@@ -155,10 +185,16 @@ func UpdateConnection(w http.ResponseWriter, r *http.Request) {
 		Error(w, 404, "连接不存在")
 		return
 	}
+	if !canAccessConnection(r, oldConn) {
+		accessDenied(w)
+		return
+	}
 	// 如果密码为空，使用旧密码
 	if conn.Password == "" {
 		conn.Password = oldConn.Password
 	}
+	// 保留原创建者，防止被篡改
+	conn.CreatedBy = oldConn.CreatedBy
 
 	if err := cfg.UpdateConnection(id, conn); err != nil {
 		Error(w, 500, "更新失败: "+err.Error())
@@ -179,6 +215,14 @@ func DeleteConnection(w http.ResponseWriter, r *http.Request) {
 	}
 	cfg := config.GetConfig()
 	conn := cfg.GetConnectionByID(id)
+	if conn == nil {
+		Error(w, 404, "连接不存在")
+		return
+	}
+	if !canAccessConnection(r, conn) {
+		accessDenied(w)
+		return
+	}
 	if err := cfg.DeleteConnection(id); err != nil {
 		Error(w, 500, "删除失败: "+err.Error())
 		return
@@ -204,6 +248,10 @@ func TestConnection(w http.ResponseWriter, r *http.Request) {
 		cfg := config.GetConfig()
 		saved := cfg.GetConnectionByID(conn.ID)
 		if saved != nil {
+			if !canAccessConnection(r, saved) {
+				accessDenied(w)
+				return
+			}
 			if conn.Password == "" {
 				conn.Password = saved.Password
 			}
@@ -226,6 +274,10 @@ func ConnectConnection(w http.ResponseWriter, r *http.Request) {
 	conn := cfg.GetConnectionByID(id)
 	if conn == nil {
 		Error(w, 404, "连接不存在")
+		return
+	}
+	if !canAccessConnection(r, conn) {
+		accessDenied(w)
 		return
 	}
 	mgr := db.GetManager()
@@ -256,6 +308,10 @@ func DisconnectConnection(w http.ResponseWriter, r *http.Request) {
 		Error(w, 404, "连接不存在")
 		return
 	}
+	if !canAccessConnection(r, conn) {
+		accessDenied(w)
+		return
+	}
 	db.GetManager().CloseConnection(id)
 	auditRecord(r, "disconnect", "connection", "断开连接: "+conn.Name)
 	Success(w, map[string]interface{}{"online": false, "message": "已断开"})
@@ -267,6 +323,16 @@ func ConnectionStatus(w http.ResponseWriter, r *http.Request) {
 	id = strings.TrimSuffix(id, "/status")
 	if id == "" {
 		Error(w, 400, "连接ID不能为空")
+		return
+	}
+	cfg := config.GetConfig()
+	conn := cfg.GetConnectionByID(id)
+	if conn == nil {
+		Error(w, 404, "连接不存在")
+		return
+	}
+	if !canAccessConnection(r, conn) {
+		accessDenied(w)
 		return
 	}
 	online := db.GetManager().IsConnected(id)
@@ -285,6 +351,10 @@ func ListTables(w http.ResponseWriter, r *http.Request) {
 	conn := cfg.GetConnectionByID(id)
 	if conn == nil {
 		Error(w, 404, "连接不存在")
+		return
+	}
+	if !canAccessConnection(r, conn) {
+		accessDenied(w)
 		return
 	}
 
@@ -329,6 +399,10 @@ func ExecuteQuery(w http.ResponseWriter, r *http.Request) {
 	conn := cfg.GetConnectionByID(req.ConnectionID)
 	if conn == nil {
 		Error(w, 404, "连接不存在")
+		return
+	}
+	if !canAccessConnection(r, conn) {
+		accessDenied(w)
 		return
 	}
 

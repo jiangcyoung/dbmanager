@@ -17,7 +17,7 @@ func auditOpt(r *http.Request, action, resource, detail string) {
 
 // getQuickConn 获取连接（复用 quick.go）
 func getQuickConn(w http.ResponseWriter, r *http.Request) (model.DBConnection, db.DBDriver) {
-	return getQuickConnection(w, quickParseID(r, "/api/quick/"))
+	return getQuickConnection(w, r, quickParseID(r, "/api/quick/"))
 }
 
 // ==================== Redis 优化操作 ====================

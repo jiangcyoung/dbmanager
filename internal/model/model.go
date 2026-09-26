@@ -104,6 +104,8 @@ type DBConnection struct {
 	DBIndex int `json:"db_index,omitempty"`
 	// 额外参数
 	Params map[string]string `json:"params,omitempty"`
+	// 创建者（用户ID），普通用户仅可见自己创建的连接
+	CreatedBy string `json:"created_by,omitempty"`
 }
 
 // TestResult 连接测试结果

@@ -86,6 +86,7 @@ func createTables(db *sql.DB) error {
 			file_path TEXT,
 			db_index INTEGER DEFAULT 0,
 			params_json TEXT,
+			created_by TEXT NOT NULL DEFAULT '',
 			created_at DATETIME NOT NULL
 		)`,
 		`CREATE TABLE IF NOT EXISTS audit_logs (
@@ -106,6 +107,13 @@ func createTables(db *sql.DB) error {
 	for _, stmt := range stmts {
 		if _, err := db.Exec(stmt); err != nil {
 			return fmt.Errorf("执行 %q: %w", stmt[:40], err)
+		}
+	}
+	// 迁移：为旧库的 connections 表补充 created_by 列
+	var colCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('connections') WHERE name = 'created_by'`).Scan(&colCount); err == nil && colCount == 0 {
+		if _, err := db.Exec(`ALTER TABLE connections ADD COLUMN created_by TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("迁移 created_by 列: %w", err)
 		}
 	}
 	return nil

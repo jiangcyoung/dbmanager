@@ -9,15 +9,22 @@ import (
 
 	"dbmanager/internal/config"
 	"dbmanager/internal/db"
+	"dbmanager/internal/middleware"
 	"dbmanager/internal/model"
 )
 
 // getQuickConnection 获取连接并返回驱动
-func getQuickConnection(w http.ResponseWriter, id string) (model.DBConnection, db.DBDriver) {
+func getQuickConnection(w http.ResponseWriter, r *http.Request, id string) (model.DBConnection, db.DBDriver) {
 	cfg := config.GetConfig()
 	conn := cfg.GetConnectionByID(id)
 	if conn == nil {
 		Error(w, 404, "连接不存在")
+		return model.DBConnection{}, nil
+	}
+	// 用户隔离：普通用户仅能操作自己创建的连接
+	user := middleware.UserFromContext(r.Context())
+	if user == nil || (user.Role != model.RoleAdmin && (conn.CreatedBy == "" || conn.CreatedBy != user.ID)) {
+		Error(w, 403, "无权访问该连接")
 		return model.DBConnection{}, nil
 	}
 	driver, err := db.GetManager().GetActiveConnection(conn.ID)
@@ -96,9 +103,24 @@ func buildWhere(connType model.DBType, where map[string]interface{}) (string, er
 
 // QuickListDatabases 列出数据库
 func QuickListDatabases(w http.ResponseWriter, r *http.Request) {
-	conn, _ := getQuickConnection(w, quickParseID(r, "/api/quick/"))
+	conn, _ := getQuickConnection(w, r, quickParseID(r, "/api/quick/"))
 	if conn.ID == "" {
 		return
+	}
+	// MongoDB: 列出所有数据库
+	if conn.Type == model.DBTypeMongo {
+		if m, ok := db.GetMongoDriver(conn); ok {
+			names, err := m.ListDatabases()
+			if err != nil {
+				Error(w, 500, "获取库列表失败: "+err.Error())
+				return
+			}
+			if names == nil {
+				names = []string{}
+			}
+			Success(w, names)
+			return
+		}
 	}
 	if conn.Type != model.DBTypeMySQL && conn.Type != model.DBTypePostgres {
 		Error(w, 400, "当前数据库类型不支持库操作")
@@ -128,7 +150,7 @@ func QuickListDatabases(w http.ResponseWriter, r *http.Request) {
 
 // QuickCreateDatabase 创建数据库
 func QuickCreateDatabase(w http.ResponseWriter, r *http.Request) {
-	conn, _ := getQuickConnection(w, quickParseID(r, "/api/quick/"))
+	conn, _ := getQuickConnection(w, r, quickParseID(r, "/api/quick/"))
 	if conn.ID == "" {
 		return
 	}
@@ -142,6 +164,17 @@ func QuickCreateDatabase(w http.ResponseWriter, r *http.Request) {
 	if req.Name == "" {
 		Error(w, 400, "数据库名不能为空")
 		return
+	}
+	// MongoDB: 创建数据库
+	if conn.Type == model.DBTypeMongo {
+		if m, ok := db.GetMongoDriver(conn); ok {
+			if err := m.CreateDatabase(req.Name); err != nil {
+				Error(w, 500, "创建数据库失败: "+err.Error())
+				return
+			}
+			Success(w, "创建成功")
+			return
+		}
 	}
 	if conn.Type == model.DBTypeMySQL {
 		sql := fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s DEFAULT CHARACTER SET utf8mb4", quoteIdent(conn.Type, req.Name))
@@ -177,7 +210,7 @@ func QuickCreateDatabase(w http.ResponseWriter, r *http.Request) {
 
 // QuickDropDatabase 删除数据库
 func QuickDropDatabase(w http.ResponseWriter, r *http.Request) {
-	conn, _ := getQuickConnection(w, quickParseID(r, "/api/quick/"))
+	conn, _ := getQuickConnection(w, r, quickParseID(r, "/api/quick/"))
 	if conn.ID == "" {
 		return
 	}
@@ -185,6 +218,17 @@ func QuickDropDatabase(w http.ResponseWriter, r *http.Request) {
 	if name == "" {
 		Error(w, 400, "数据库名不能为空")
 		return
+	}
+	// MongoDB: 删除数据库
+	if conn.Type == model.DBTypeMongo {
+		if m, ok := db.GetMongoDriver(conn); ok {
+			if err := m.DropDatabase(name); err != nil {
+				Error(w, 500, "删除数据库失败: "+err.Error())
+				return
+			}
+			Success(w, "删除成功")
+			return
+		}
 	}
 	if conn.Type == model.DBTypeMySQL {
 		sql := fmt.Sprintf("DROP DATABASE IF EXISTS %s", quoteIdent(conn.Type, name))
@@ -221,7 +265,7 @@ func QuickDropDatabase(w http.ResponseWriter, r *http.Request) {
 
 // QuickCreateTable 创建表
 func QuickCreateTable(w http.ResponseWriter, r *http.Request) {
-	conn, _ := getQuickConnection(w, quickParseID(r, "/api/quick/"))
+	conn, _ := getQuickConnection(w, r, quickParseID(r, "/api/quick/"))
 	if conn.ID == "" {
 		return
 	}
@@ -305,7 +349,7 @@ func QuickCreateTable(w http.ResponseWriter, r *http.Request) {
 
 // QuickDropTable 删除表
 func QuickDropTable(w http.ResponseWriter, r *http.Request) {
-	conn, _ := getQuickConnection(w, quickParseID(r, "/api/quick/"))
+	conn, _ := getQuickConnection(w, r, quickParseID(r, "/api/quick/"))
 	if conn.ID == "" {
 		return
 	}
@@ -348,7 +392,7 @@ func qualifyTable(connType model.DBType, dbName, table string) string {
 
 // QuickListTables 列出表（支持指定数据库）
 func QuickListTables(w http.ResponseWriter, r *http.Request) {
-	conn, _ := getQuickConnection(w, quickParseID(r, "/api/quick/"))
+	conn, _ := getQuickConnection(w, r, quickParseID(r, "/api/quick/"))
 	if conn.ID == "" {
 		return
 	}
@@ -371,7 +415,7 @@ func QuickListTables(w http.ResponseWriter, r *http.Request) {
 
 // QuickRenameTable 表改名
 func QuickRenameTable(w http.ResponseWriter, r *http.Request) {
-	conn, _ := getQuickConnection(w, quickParseID(r, "/api/quick/"))
+	conn, _ := getQuickConnection(w, r, quickParseID(r, "/api/quick/"))
 	if conn.ID == "" {
 		return
 	}
@@ -386,6 +430,16 @@ func QuickRenameTable(w http.ResponseWriter, r *http.Request) {
 	if req.Table == "" || req.NewName == "" {
 		Error(w, 400, "表名和新表名不能为空")
 		return
+	}
+	if conn.Type == model.DBTypeMongo {
+		if m, ok := db.GetMongoDriver(conn); ok {
+			if err := m.RenameCollection(req.Table, req.NewName); err != nil {
+				Error(w, 500, "改名失败: "+err.Error())
+				return
+			}
+			Success(w, "改名成功")
+			return
+		}
 	}
 	if conn.Type != model.DBTypeMySQL && conn.Type != model.DBTypePostgres && conn.Type != model.DBTypeSQLite {
 		Error(w, 400, "当前数据库类型不支持表改名")
@@ -412,7 +466,7 @@ func QuickRenameTable(w http.ResponseWriter, r *http.Request) {
 
 // QuickGetColumns 获取表列信息（含主键标识）
 func QuickGetColumns(w http.ResponseWriter, r *http.Request) {
-	conn, _ := getQuickConnection(w, quickParseID(r, "/api/quick/"))
+	conn, _ := getQuickConnection(w, r, quickParseID(r, "/api/quick/"))
 	if conn.ID == "" {
 		return
 	}
@@ -447,6 +501,27 @@ func QuickGetColumns(w http.ResponseWriter, r *http.Request) {
 		result, err = driver.Query(sql, "")
 	case model.DBTypeSQLite:
 		result, err = driver.Query(fmt.Sprintf("PRAGMA table_info(%s)", quoteIdent(conn.Type, table)), "")
+	case model.DBTypeMongo:
+		if m, ok := db.GetMongoDriver(conn); ok {
+			fields, ferr := m.GetSampleFields(table)
+			if ferr != nil {
+				Error(w, 500, "获取字段信息失败: "+ferr.Error())
+				return
+			}
+			rows := make([]interface{}, 0, len(fields))
+			for _, f := range fields {
+				rows = append(rows, map[string]interface{}{"Field": f, "Type": "-", "Null": "YES", "Default": "", "Key": ""})
+			}
+			result = &model.QueryResult{
+				Success: true,
+				Columns: []string{"Field", "Type", "Null", "Default", "Key"},
+				Rows:    rows,
+				Count:   int64(len(rows)),
+			}
+		} else {
+			Error(w, 500, "获取MongoDB驱动失败")
+			return
+		}
 	default:
 		Error(w, 400, "当前数据库类型不支持获取列信息")
 		return
@@ -462,7 +537,7 @@ func QuickGetColumns(w http.ResponseWriter, r *http.Request) {
 
 // QuickListIndexes 列出索引
 func QuickListIndexes(w http.ResponseWriter, r *http.Request) {
-	conn, _ := getQuickConnection(w, quickParseID(r, "/api/quick/"))
+	conn, _ := getQuickConnection(w, r, quickParseID(r, "/api/quick/"))
 	if conn.ID == "" {
 		return
 	}
@@ -506,7 +581,7 @@ func QuickListIndexes(w http.ResponseWriter, r *http.Request) {
 
 // QuickCreateIndex 创建索引
 func QuickCreateIndex(w http.ResponseWriter, r *http.Request) {
-	conn, _ := getQuickConnection(w, quickParseID(r, "/api/quick/"))
+	conn, _ := getQuickConnection(w, r, quickParseID(r, "/api/quick/"))
 	if conn.ID == "" {
 		return
 	}
@@ -564,7 +639,7 @@ func QuickCreateIndex(w http.ResponseWriter, r *http.Request) {
 
 // QuickDropIndex 删除索引
 func QuickDropIndex(w http.ResponseWriter, r *http.Request) {
-	conn, _ := getQuickConnection(w, quickParseID(r, "/api/quick/"))
+	conn, _ := getQuickConnection(w, r, quickParseID(r, "/api/quick/"))
 	if conn.ID == "" {
 		return
 	}
@@ -610,7 +685,7 @@ func QuickDropIndex(w http.ResponseWriter, r *http.Request) {
 
 // QuickListRows 查询数据
 func QuickListRows(w http.ResponseWriter, r *http.Request) {
-	conn, _ := getQuickConnection(w, quickParseID(r, "/api/quick/"))
+	conn, _ := getQuickConnection(w, r, quickParseID(r, "/api/quick/"))
 	if conn.ID == "" {
 		return
 	}
@@ -630,13 +705,16 @@ func QuickListRows(w http.ResponseWriter, r *http.Request) {
 	driver, _ := db.GetManager().GetActiveConnection(conn.ID)
 
 	if conn.Type == model.DBTypeMongo {
-		result, err := driver.Query("{}", table)
-		if err != nil {
-			Error(w, 500, "查询失败: "+err.Error())
+		if m, ok := db.GetMongoDriver(conn); ok {
+			lim, _ := strconv.ParseInt(limit, 10, 64)
+			result, err := m.FindWithOptions(table, nil, nil, lim, 0, nil)
+			if err != nil {
+				Error(w, 500, "查询失败: "+err.Error())
+				return
+			}
+			Success(w, result)
 			return
 		}
-		Success(w, result)
-		return
 	}
 	if conn.Type == model.DBTypeRedis {
 		result, err := driver.Query("", "")
@@ -658,7 +736,7 @@ func QuickListRows(w http.ResponseWriter, r *http.Request) {
 
 // QuickInsertRow 插入行
 func QuickInsertRow(w http.ResponseWriter, r *http.Request) {
-	conn, _ := getQuickConnection(w, quickParseID(r, "/api/quick/"))
+	conn, _ := getQuickConnection(w, r, quickParseID(r, "/api/quick/"))
 	if conn.ID == "" {
 		return
 	}
@@ -716,7 +794,7 @@ func QuickInsertRow(w http.ResponseWriter, r *http.Request) {
 
 // QuickUpdateRows 更新行
 func QuickUpdateRows(w http.ResponseWriter, r *http.Request) {
-	conn, _ := getQuickConnection(w, quickParseID(r, "/api/quick/"))
+	conn, _ := getQuickConnection(w, r, quickParseID(r, "/api/quick/"))
 	if conn.ID == "" {
 		return
 	}
@@ -763,7 +841,7 @@ func QuickUpdateRows(w http.ResponseWriter, r *http.Request) {
 
 // QuickDeleteRows 删除行
 func QuickDeleteRows(w http.ResponseWriter, r *http.Request) {
-	conn, _ := getQuickConnection(w, quickParseID(r, "/api/quick/"))
+	conn, _ := getQuickConnection(w, r, quickParseID(r, "/api/quick/"))
 	if conn.ID == "" {
 		return
 	}

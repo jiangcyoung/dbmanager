@@ -725,14 +725,14 @@ async function selectConnection(id) {
                 collectionInput.style.display = 'none';
             }
             
-            document.getElementById('btnNewDb').style.display = (conn.type === 'mysql' || conn.type === 'postgres') ? 'inline-block' : 'none';
+            document.getElementById('btnNewDb').style.display = (conn.type === 'mysql' || conn.type === 'postgres' || conn.type === 'mongodb') ? 'inline-block' : 'none';
             document.getElementById('btnNewTable').style.display = (conn.type === 'redis') ? 'none' : 'inline-block';
             currentTable = null;
             
             document.getElementById('resultInfo').textContent = '执行结果';
             document.getElementById('resultContent').innerHTML = '<div class="empty-result">执行查询后显示结果</div>';
             
-            if (conn.type === 'mysql' || conn.type === 'postgres') {
+            if (conn.type === 'mysql' || conn.type === 'postgres' || conn.type === 'mongodb') {
                 await loadDatabases(conn.id, conn.database);
             } else {
                 document.getElementById('dbSelector').style.display = 'none';
@@ -793,7 +793,7 @@ async function loadTables(connId) {
     
     try {
         let url = `${API_BASE}/connections/${connId}/tables`;
-        if ((getConnType() === 'MySQL' || getConnType() === 'PgSQL') && currentDb) {
+        if ((getConnType() === 'MySQL' || getConnType() === 'PgSQL' || getConnType() === 'Mongo') && currentDb) {
             url = `${API_BASE}/quick/${connId}/tables?db=${encodeURIComponent(currentDb)}`;
         }
         const res = await authFetch(url);
@@ -805,11 +805,15 @@ async function loadTables(connId) {
             } else {
                 tableList.innerHTML = tables.map(table => {
                     const safe = table.replace(/'/g, "\\'");
+                    const isRedis = getConnType() === 'Redis';
                     return `
                     <div class="table-item ${table === currentTable ? 'selected' : ''}">
                         <span class="table-name" onclick="selectTable('${safe}')" ondblclick="insertTableName('${safe}')"
                               title="单击查看数据，双击插入SQL">${table}</span>
                         <span class="table-op">
+                            ${!isRedis ? `<button class="table-op-btn" title="插入行" onclick="currentTable='${safe}';quickInsertRow()">＋</button>` : ''}
+                            ${!isRedis ? `<button class="table-op-btn" title="更新行" onclick="currentTable='${safe}';quickUpdateRow()">✎</button>` : ''}
+                            ${!isRedis ? `<button class="table-op-btn danger" title="删除行" onclick="currentTable='${safe}';quickDeleteRow()">✕</button>` : ''}
                             <button class="table-op-btn" title="改名" onclick="quickRenameTable('${safe}')">✏️</button>
                             <button class="table-op-btn danger" title="删除" onclick="quickDropTable()">🗑</button>
                         </span>
@@ -829,7 +833,7 @@ async function loadTables(connId) {
 async function refreshTables() {
     if (!currentConnId) return;
     const type = getConnType();
-    if (type === 'MySQL' || type === 'PgSQL') {
+    if (type === 'MySQL' || type === 'PgSQL' || type === 'Mongo') {
         await loadDatabases(currentConnId, currentDb);
     } else {
         await loadTables(currentConnId);
@@ -900,7 +904,7 @@ async function executeQuery() {
 function renderResultTable(result) {
     const resultContent = document.getElementById('resultContent');
     const columns = result.columns || Object.keys(result.rows[0] || {});
-    const isSqlLike = ['MySQL', 'PgSQL', 'SQLite'].includes(getConnType());
+    const isSqlLike = ['MySQL', 'PgSQL', 'SQLite', 'Mongo'].includes(getConnType());
     
     const html = `
         <table class="result-table">
@@ -944,7 +948,7 @@ function getCurrentConn() {
 
 async function getTableColumns(table) {
     let url = `${API_BASE}/quick/${currentConnId}/columns?table=${encodeURIComponent(table)}`;
-    if ((getConnType() === 'MySQL' || getConnType() === 'PgSQL') && currentDb) {
+    if ((getConnType() === 'MySQL' || getConnType() === 'PgSQL' || getConnType() === 'Mongo') && currentDb) {
         url += `&db=${encodeURIComponent(currentDb)}`;
     }
     const res = await authFetch(url);
@@ -966,6 +970,27 @@ async function editRow(idx) {
     if (!row) return;
     const table = currentTable;
     try {
+        if (getConnType() === 'Mongo') {
+            const idVal = row['_id'];
+            if (!idVal) { showToast('该文档无 _id 字段', 'warning'); return; }
+            quickMode = 'mongoUpdate';
+            openQuick(`更新文档 - ${table}`);
+            const dataEntries = Object.entries(row).filter(([k]) => k !== '_id');
+            document.getElementById('quickFormContainer').innerHTML = `
+                <input type="hidden" id="qTable" value="${table}">
+                <input type="hidden" id="qMongoId" value="${escapeHtml(String(idVal))}">
+                <p style="color:#86909c;font-size:12px;margin-bottom:8px;">编辑字段值（_id 为条件，不可修改）</p>
+                <div id="kvRows">
+                    ${dataEntries.map(([k, v]) => `
+                    <div class="kv-row">
+                        <input class="kv-key" value="${escapeHtml(k)}" style="width:140px" readonly>
+                        <input class="kv-val" value="${escapeHtml(formatPlainValue(v))}" style="width:200px">
+                    </div>`).join('')}
+                </div>
+                <button class="btn btn-sm" style="margin-top:6px;" onclick="addKvRow('kvRows')">＋ 添加字段</button>
+            `;
+            return;
+        }
         const { columns, pk } = await getTableColumns(table);
         if (!pk) { showToast('该表无主键，无法生成更新条件', 'warning'); return; }
         const colNames = columns.map(c => c.Field || c.name || c.column_name).filter(Boolean);
@@ -996,6 +1021,24 @@ async function deleteRow(idx) {
     if (!row) return;
     const table = currentTable;
     try {
+        if (getConnType() === 'Mongo') {
+            const idVal = row['_id'];
+            if (!idVal) { showToast('该文档无 _id 字段', 'warning'); return; }
+            if (!confirm(`确定要删除该文档吗？\n\n_id: ${idVal}`)) return;
+            const res = await authFetch(`${API_BASE}/quick/${currentConnId}/row`, {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ table: table, where: { _id: idVal } })
+            });
+            const data = await res.json();
+            if (data.code === 0) {
+                showToast('删除成功', 'success');
+                quickViewRows();
+            } else {
+                showToast('删除失败：' + data.message, 'error');
+            }
+            return;
+        }
         const { pk } = await getTableColumns(table);
         if (!pk) { showToast('该表无主键，无法生成删除条件', 'warning'); return; }
         const where = `\`${pk}\` = ${quoteSqlVal(row[pk])}`;
@@ -1039,6 +1082,12 @@ function formatValue(val) {
     if (val === null || val === undefined) return '<span style="color: #86909c;">NULL</span>';
     if (typeof val === 'object') return JSON.stringify(val);
     return String(val).length > 200 ? String(val).substring(0, 200) + '...' : String(val);
+}
+
+function formatPlainValue(val) {
+    if (val === null || val === undefined) return '';
+    if (typeof val === 'object') return JSON.stringify(val);
+    return String(val);
 }
 
 function openAddModal() {
@@ -1337,7 +1386,7 @@ function getConnType() {
 }
 
 function dbQueryPart() {
-    if (currentDb && getConnType() === 'MySQL') {
+    if (currentDb && (getConnType() === 'MySQL' || getConnType() === 'PgSQL' || getConnType() === 'Mongo')) {
         return `db=${encodeURIComponent(currentDb)}`;
     }
     return '';
@@ -1382,10 +1431,17 @@ function addKvRow(containerId) {
 
 function readKv(containerId) {
     const obj = {};
+    const isMongo = getConnType() === 'Mongo';
     document.querySelectorAll(`#${containerId} .kv-row`).forEach(row => {
         const k = row.querySelector('.kv-key').value.trim();
-        const v = row.querySelector('.kv-val').value.trim();
-        if (k) obj[k] = v;
+        let v = row.querySelector('.kv-val').value.trim();
+        if (k) {
+            if (isMongo) {
+                try { obj[k] = JSON.parse(v); } catch { obj[k] = v; }
+            } else {
+                obj[k] = v;
+            }
+        }
     });
     return obj;
 }
@@ -1439,7 +1495,7 @@ async function quickViewRows() {
     if (!currentTable) { showToast('请先选择一个表', 'warning'); return; }
     try {
         let url = `${API_BASE}/quick/${currentConnId}/rows?table=${encodeURIComponent(currentTable)}&limit=100`;
-        if ((getConnType() === 'MySQL' || getConnType() === 'PgSQL') && currentDb) {
+        if ((getConnType() === 'MySQL' || getConnType() === 'PgSQL' || getConnType() === 'Mongo') && currentDb) {
             url += `&db=${encodeURIComponent(currentDb)}`;
         }
         const res = await authFetch(url);
@@ -1571,7 +1627,7 @@ async function quickDropTable() {
 
 async function quickSubmit() {
     const qtable = document.getElementById('qTable')?.value?.trim();
-    const body = {};
+    let body = {};
     let url = '';
     let method = 'POST';
 
@@ -1654,7 +1710,7 @@ async function quickSubmit() {
             body.table = qtable;
             body.new_name = newName;
             let url2 = `${API_BASE}/quick/${currentConnId}/table/rename`;
-            if ((getConnType() === 'MySQL' || getConnType() === 'PgSQL') && currentDb) {
+            if ((getConnType() === 'MySQL' || getConnType() === 'PgSQL' || getConnType() === 'Mongo') && currentDb) {
                 url2 += `?db=${encodeURIComponent(currentDb)}`;
             }
             url = url2;
@@ -1689,6 +1745,22 @@ async function quickSubmit() {
                 url = `${API_BASE}/quick/${currentConnId}/redis/zset`;
                 body = { key, member: document.getElementById('rValue').value, score: parseFloat(document.getElementById('rScore').value) || 0 };
             }
+            break;
+        }
+        case 'mongoUpdate': {
+            const qtable = document.getElementById('qTable').value;
+            const idVal = document.getElementById('qMongoId').value;
+            const data = {};
+            document.querySelectorAll('#kvRows .kv-row').forEach(row => {
+                const k = row.querySelector('.kv-key').value.trim();
+                const v = row.querySelector('.kv-val').value;
+                if (!k) return;
+                try { data[k] = JSON.parse(v); } catch { data[k] = v; }
+            });
+            if (Object.keys(data).length === 0) { showToast('请至少填写一个字段', 'warning'); return; }
+            url = `${API_BASE}/quick/${currentConnId}/row`;
+            body = { table: qtable, where: { _id: idVal }, data };
+            method = 'PUT';
             break;
         }
         default:
