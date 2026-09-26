@@ -905,6 +905,11 @@ function renderResultTable(result) {
     const resultContent = document.getElementById('resultContent');
     const columns = result.columns || Object.keys(result.rows[0] || {});
     const isSqlLike = ['MySQL', 'PgSQL', 'SQLite', 'Mongo'].includes(getConnType());
+
+    if (getConnType() === 'Mongo') {
+        resultContent.innerHTML = renderMongoDocs(result.rows);
+        return;
+    }
     
     const html = `
         <table class="result-table">
@@ -932,6 +937,71 @@ function renderResultTable(result) {
         </table>
     `;
     resultContent.innerHTML = html;
+}
+
+// ===== MongoDB 文档 JSON 文本展示 =====
+const MONGO_FIELD_LIMIT = 10;
+
+function renderMongoDocs(rows) {
+    return rows.map((row, idx) => {
+        if (typeof row !== 'object' || row === null) {
+            return `<pre class="json-box">${escapeHtml(String(row))}</pre>`;
+        }
+        const idVal = row['_id'] !== undefined ? String(row['_id']) : '';
+        const entries = Object.entries(row);
+        const visCount = Math.min(entries.length, MONGO_FIELD_LIMIT);
+        const visLines = entries.slice(0, visCount);
+        const hidLines = entries.slice(visCount);
+        let body = '{\n';
+        visLines.forEach((e, i) => {
+            body += jsonEntryLine(e) + (i < visCount - 1 ? ',' : '') + '\n';
+        });
+        if (hidLines.length) {
+            body += ',' + `<span class="j-extra" style="display:none" data-count="${hidLines.length}" data-total="${entries.length}">\n` +
+                hidLines.map((e, i) => jsonEntryLine(e) + (i < hidLines.length - 1 ? ',' : '')).join('\n') +
+                `</span>\n`;
+        }
+        body += '}';
+        const expandBtn = hidLines.length
+            ? `<button class="expand-btn" onclick="toggleMongoFields(this)">还有 ${hidLines.length} 个字段未显示 · 展开全部 ${entries.length} 个字段</button>`
+            : '';
+        return `
+        <div class="doc-block">
+            <div class="doc-bar">
+                <span class="doc-id">文档 ${idx + 1}${idVal ? ' · ' + idVal : ''}</span>
+                <div class="doc-ops">
+                    <button class="row-op-btn" title="编辑" onclick="editRow(${idx})">编辑</button>
+                    <button class="row-op-btn danger" title="删除" onclick="deleteRow(${idx})">删除</button>
+                </div>
+            </div>
+            <pre class="json-box">${body}</pre>
+            ${expandBtn}
+        </div>`;
+    }).join('');
+}
+
+function jsonEntryLine(e) {
+    const [k, v] = e;
+    return `  <span class="j-key">"${escapeHtml(String(k))}"</span>: ${formatJsonValue(v)}`;
+}
+
+function formatJsonValue(v) {
+    if (v === null || v === undefined) return '<span class="j-null">null</span>';
+    if (typeof v === 'boolean') return '<span class="j-num">' + v + '</span>';
+    if (typeof v === 'number') return '<span class="j-num">' + v + '</span>';
+    if (typeof v === 'string') return '<span class="j-str">"' + escapeHtml(v) + '"</span>';
+    return '<span class="j-str">' + escapeHtml(JSON.stringify(v)) + '</span>';
+}
+
+function toggleMongoFields(btn) {
+    const block = btn.closest('.doc-block');
+    const extra = block.querySelector('.j-extra');
+    if (!extra) return;
+    const expanded = block.classList.toggle('expanded');
+    extra.style.display = expanded ? 'inline' : 'none';
+    btn.textContent = expanded
+        ? '收起多余字段'
+        : `还有 ${extra.dataset.count} 个字段未显示 · 展开全部 ${extra.dataset.total} 个字段`;
 }
 
 function quoteSqlVal(v) {

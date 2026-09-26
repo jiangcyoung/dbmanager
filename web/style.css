@@ -796,6 +796,64 @@ body {
     border-color: #f53f3f;
 }
 
+/* ============ MongoDB 文档 JSON 文本展示 ============ */
+.doc-block {
+    margin-bottom: 12px;
+    background: #fff;
+    border: 1px solid #e5e6eb;
+    border-radius: 8px;
+    padding: 10px 12px;
+}
+.doc-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+.doc-id {
+    font-size: 12px;
+    color: #86909c;
+    font-family: Consolas, Menlo, "SF Mono", monospace;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.doc-ops {
+    margin-left: auto;
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+.json-box {
+    margin: 0;
+    padding: 10px 12px;
+    background: #f7f8fa;
+    border: 1px solid #f2f3f5;
+    border-radius: 6px;
+    font-family: Consolas, Menlo, "SF Mono", monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    color: #1f2329;
+    overflow-x: auto;
+}
+.j-key { color: #3370ff; }
+.j-str { color: #1f2329; }
+.j-num { color: #86909c; }
+.j-null { color: #86909c; font-style: italic; }
+.expand-btn {
+    margin-top: 8px;
+    border: 1px solid #d4dcff;
+    background: #eef2ff;
+    color: #3370ff;
+    cursor: pointer;
+    font-size: 12px;
+    padding: 4px 12px;
+    border-radius: 999px;
+}
+.expand-btn:hover {
+    background: #e0e8ff;
+}
+
 /* ============ 登录页 ============ */
 .auth-page {
     display: flex;
