@@ -67,6 +67,7 @@ async function submitAuth() {
                 authToken = data.data.token;
                 currentUser = data.data.user;
                 localStorage.setItem('db_token', authToken);
+                resetQueryState();
                 showApp(true);
                 showToast('登录成功', 'success');
             } else {
@@ -93,7 +94,35 @@ async function logout() {
     authToken = '';
     currentUser = null;
     localStorage.removeItem('db_token');
+    resetQueryState();
     showApp(false);
+}
+
+// 清理查询工作区，避免下一个登录用户看到上一个用户的查询结果
+function resetQueryState() {
+    currentConnId = null;
+    currentTable = null;
+    currentDb = '';
+    currentRows = [];
+    currentOptTab = '';
+    const ids = ['queryPanel', 'toolbar', 'optimizePanel', 'dbSelector', 'welcome', 'adminPanel'];
+    ids.forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
+    const w = document.getElementById('welcome');
+    if (w) w.style.display = 'flex';
+    const ed = document.getElementById('sqlEditor');
+    if (ed) ed.value = '';
+    const info = document.getElementById('resultInfo');
+    if (info) info.textContent = '执行结果';
+    const rc = document.getElementById('resultContent');
+    if (rc) rc.innerHTML = '';
+    const cl = document.getElementById('connectionList');
+    if (cl) cl.innerHTML = '';
+    const ds = document.getElementById('dbSelect');
+    if (ds) ds.innerHTML = '';
+    const tl = document.getElementById('tableList');
+    if (tl) tl.innerHTML = '';
+    const cq = document.getElementById('connQuickSwitch');
+    if (cq) cq.innerHTML = '';
 }
 
 // 显示/隐藏主应用

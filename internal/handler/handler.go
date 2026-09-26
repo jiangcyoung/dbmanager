@@ -31,9 +31,6 @@ func canAccessConnection(r *http.Request, conn *model.DBConnection) bool {
 	if user == nil {
 		return false
 	}
-	if user.Role == model.RoleAdmin {
-		return true
-	}
 	return conn.CreatedBy != "" && conn.CreatedBy == user.ID
 }
 
@@ -91,8 +88,8 @@ func GetConnections(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserFromContext(r.Context())
 	result := make([]map[string]interface{}, 0, len(conns))
 	for _, c := range conns {
-		// 用户隔离：普通用户仅可见自己创建的连接
-		if user == nil || (user.Role != model.RoleAdmin && (c.CreatedBy == "" || c.CreatedBy != user.ID)) {
+		// 用户隔离：仅可见自己创建的连接
+		if user == nil || c.CreatedBy == "" || c.CreatedBy != user.ID {
 			continue
 		}
 		online := mgr.IsConnected(c.ID)

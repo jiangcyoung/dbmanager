@@ -23,7 +23,7 @@ func getQuickConnection(w http.ResponseWriter, r *http.Request, id string) (mode
 	}
 	// 用户隔离：普通用户仅能操作自己创建的连接
 	user := middleware.UserFromContext(r.Context())
-	if user == nil || (user.Role != model.RoleAdmin && (conn.CreatedBy == "" || conn.CreatedBy != user.ID)) {
+	if user == nil || conn.CreatedBy == "" || conn.CreatedBy != user.ID {
 		Error(w, 403, "无权访问该连接")
 		return model.DBConnection{}, nil
 	}
